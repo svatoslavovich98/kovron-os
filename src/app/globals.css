@@ -1,0 +1,105 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Light theme */
+    --background: 100 4% 95%;
+    --foreground: 130 8% 10%;
+    --card: 0 0% 100%;
+    --card-foreground: 130 8% 10%;
+    --secondary-bg: 120 4% 92%;
+    --muted: 120 4% 92%;
+    --muted-foreground: 120 4% 40%;
+    --border: 120 4% 85%;
+    --primary: 80 54% 58%;
+    --primary-foreground: 130 8% 10%;
+    --primary-soft: 72 60% 90%;
+    --income: 145 60% 50%;
+    --expense: 0 100% 71%;
+    --warning: 36 90% 65%;
+    --info: 217 100% 70%;
+    --destructive: 0 100% 71%;
+    --destructive-foreground: 0 0% 100%;
+    --radius: 18px;
+  }
+
+  .dark {
+    --background: 130 8% 7%;
+    --foreground: 100 8% 96%;
+    --card: 130 8% 10%;
+    --card-foreground: 100 8% 96%;
+    --secondary-bg: 130 8% 14%;
+    --muted: 130 8% 14%;
+    --muted-foreground: 110 4% 63%;
+    --border: 130 8% 18%;
+    --primary: 80 54% 58%;
+    --primary-foreground: 130 8% 10%;
+    --primary-soft: 72 60% 90%;
+    --income: 145 60% 50%;
+    --expense: 0 100% 71%;
+    --warning: 36 90% 65%;
+    --info: 217 100% 70%;
+    --destructive: 0 100% 71%;
+    --destructive-foreground: 0 0% 100%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground));
+}
+
+/* PWA safe area */
+body {
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+
+/* Skeleton loading animation */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.skeleton {
+  background: linear-gradient(90deg, hsl(var(--muted)) 25%, hsl(var(--secondary-bg)) 50%, hsl(var(--muted)) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+  border-radius: 8px;
+}
+
+/* Prevent text selection on interactive elements */
+.no-select {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* Touch-friendly tap highlight */
+@media (hover: none) {
+  button, a, [role="button"] {
+    -webkit-tap-highlight-color: transparent;
+  }
+}
