@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -36,7 +36,9 @@ export default function FinancePage() {
   const [toAccountId, setToAccountId] = useState("");
   const [comment, setComment] = useState("");
   const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [saveNotice, setSaveNotice] = useState<{ tone: "saving" | "success" | "error"; text: string } | null>(null);
 
   useEffect(() => {
     if (!modal) return;
@@ -47,19 +49,27 @@ export default function FinancePage() {
   }, [modal, accounts, incomeCategories, expenseCategories]);
 
   const saveTransaction = async () => {
+    if (savingRef.current) return;
     const value = Number(amount);
     if (!modal || !value || value <= 0 || !accountId || (modal === "transfer" && (!toAccountId || toAccountId === accountId))) {
       setFormError("Проверьте сумму, счёт и выбранные параметры"); return;
     }
+    savingRef.current = true;
     setSaving(true); setFormError(null);
-    const created = await createTransaction({
+    setSaveNotice({ tone: "saving", text: "Операция уже добавлена. Синхронизируем с базой в фоне…" });
+    const savePromise = createTransaction({
       type: modal, amount: value, categoryId: modal === "transfer" ? undefined : categoryId,
       accountId, toAccountId: modal === "transfer" ? toAccountId : undefined,
       description: comment || undefined, userId: user?.id, userName: user?.name,
       createdAt: new Date().toISOString(),
     });
+    setModal(null);
+    const created = await savePromise;
+    savingRef.current = false;
     setSaving(false);
-    if (created) setModal(null); else setFormError("Не удалось сохранить операцию. Повторите попытку.");
+    setSaveNotice(created
+      ? { tone: "success", text: "Операция сохранена. Баланс пересчитан автоматически." }
+      : { tone: "error", text: "Операцию не удалось добавить. Проверьте подключение и повторите попытку." });
   };
 
   const periodStart = new Date();
@@ -105,6 +115,18 @@ export default function FinancePage() {
   return (
     <div className="p-4 lg:p-6 max-w-3xl mx-auto space-y-5">
       <div className="flex items-center justify-between gap-3"><h1 className="text-xl font-bold">Финансы</h1><Button variant="outline" size="sm" onClick={exportFinance}><Download className="h-4 w-4 mr-1" />Экспорт</Button></div>
+
+      {saveNotice && (
+        <div className={cn(
+          "flex items-center justify-between gap-3 rounded-md border px-4 py-3 text-sm",
+          saveNotice.tone === "error" ? "border-expense/30 bg-expense/10 text-expense" :
+          saveNotice.tone === "success" ? "border-income/30 bg-income/10 text-income" :
+          "border-primary/30 bg-primary/10 text-foreground",
+        )}>
+          <span>{saveNotice.text}</span>
+          <button type="button" className="shrink-0 text-muted-foreground hover:text-foreground" onClick={() => setSaveNotice(null)} aria-label="Закрыть сообщение"><X className="h-4 w-4" /></button>
+        </div>
+      )}
 
       {/* Balance */}
       <Card className="bg-gradient-to-br from-card to-secondary2">

@@ -49,28 +49,28 @@ const rows = [
     client: { name: "Антон Наимов", phone: "телефон не указан · Антон Наимов", source: "Артём" },
     car: { brand: "Volkswagen", model: "Touareg", generation: "2006–2007", year: 2006, rows: 2 },
     kitTypes: ["full"], kitComment: "2 ряда полных", total: 8000, chinese: 6000, seamstress: 1000,
-    paid: 8000, paymentMethod: "Наличные", status: "completed", comment: "1000 Оксане",
+    paid: 0, paymentMethod: "Наличные", status: "completed", comment: "1000 Оксане",
   },
   {
     number: "K-250730-01", createdAt: "2025-07-30T12:00:00+07:00",
     client: { name: "Василий", phone: "89237219811", source: "Авито" },
     car: { brand: "Infiniti", model: "M35", year: 2008, rows: 2 },
     kitTypes: ["full"], kitComment: "2 ряда полных", total: 12000, chinese: 6000, seamstress: 1000,
-    paid: 12000, paymentMethod: "Наличные", status: "new", comment: "1000 Оксане",
+    paid: 0, paymentMethod: "Наличные", status: "new", comment: "1000 Оксане",
   },
   {
     number: "K-250730-02", createdAt: "2025-07-30T12:10:00+07:00",
     client: { name: "Клиент 89059272222", phone: "89059272222" },
     car: { brand: "Changan", model: "Q05 II", generation: "Куань", year: 2026, rows: 2 },
     kitTypes: ["full"], kitComment: "2 ряда полных", total: 5000, chinese: 6000, seamstress: 0,
-    paid: 5000, paymentMethod: "Наличные", status: "new", comment: "1000 Оксане",
+    paid: 0, paymentMethod: "Наличные", status: "new", comment: "1000 Оксане",
   },
   {
     number: "K-250730-03", createdAt: "2025-07-30T12:20:00+07:00",
     client: { name: "Сергей", phone: "89609577160", source: "Авито" },
     car: { brand: "Без автомобиля", model: "—", comment: "Автомобиль не указан" },
     kitTypes: ["custom"], kitComment: "Подпятники 3 шт. (2 наши, 1 сшить клиента)", total: 2000, chinese: 500, seamstress: 500,
-    paid: 2000, paymentMethod: "Наличные", status: "completed", comment: "Оксане 500",
+    paid: 0, paymentMethod: "Наличные", status: "completed", comment: "Оксане 500",
   },
 ];
 

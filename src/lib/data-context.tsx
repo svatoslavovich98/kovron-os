@@ -171,6 +171,65 @@ function mapOrderRow(o: Record<string, any>): Order {
   } as Order;
 }
 
+const financeOutboxKey = "kovron_finance_outbox_v1";
+
+function mapTransactionRow(t: Record<string, any>): Transaction {
+  return {
+    id: t.id, type: t.type, amount: Number(t.amount),
+    categoryId: t.category_id ?? t.categoryId, accountId: t.account_id ?? t.accountId,
+    toAccountId: t.to_account_id ?? t.toAccountId, orderId: t.order_id ?? t.orderId,
+    clientId: t.client_id ?? t.clientId, paymentType: t.payment_type ?? t.paymentType,
+    description: t.description, receiptPhoto: t.receipt_photo ?? t.receiptPhoto,
+    userId: t.user_id ?? t.userId, userName: t.user_name ?? t.userName ?? "",
+    createdAt: t.created_at ?? t.createdAt,
+  } as Transaction;
+}
+
+function readFinanceOutbox(): Transaction[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const value = JSON.parse(window.localStorage.getItem(financeOutboxKey) || "[]");
+    return Array.isArray(value) ? value : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeFinanceOutbox(items: Transaction[]) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(financeOutboxKey, JSON.stringify(items));
+  } catch {
+    // Saving can still continue if local storage is unavailable.
+  }
+}
+
+function transactionPayload(tx: Transaction) {
+  return {
+    id: tx.id,
+    type: tx.type, amount: tx.amount, category_id: tx.categoryId,
+    account_id: tx.accountId, to_account_id: tx.toAccountId,
+    order_id: tx.orderId, client_id: tx.clientId,
+    payment_type: tx.paymentType, description: tx.description,
+    receipt_photo: tx.receiptPhoto,
+    user_id: tx.userId, user_name: tx.userName,
+    created_at: tx.createdAt,
+  };
+}
+
+function applyLedgerBalances(accounts: Account[], transactions: Transaction[]) {
+  return accounts.map(account => {
+    const balance = transactions.reduce((sum, tx) => {
+      if (tx.type === "income" && tx.accountId === account.id) return sum + tx.amount;
+      if (tx.type === "expense" && tx.accountId === account.id) return sum - tx.amount;
+      if (tx.type === "transfer" && tx.accountId === account.id) return sum - tx.amount;
+      if (tx.type === "transfer" && tx.toAccountId === account.id) return sum + tx.amount;
+      return sum;
+    }, account.initialBalance);
+    return { ...account, balance };
+  });
+}
+
 function getAdminErrorMessage(error: { message?: string; details?: string } | null) {
   const message = `${error?.message || ""} ${error?.details || ""}`.toLowerCase();
   if (message.includes("duplicate") || message.includes("unique")) return "Такой логин или системный ключ уже используется";
@@ -445,11 +504,22 @@ function useSupabaseData(): AppData {
         sb.from("clients").select("*").order("created_at", { ascending: false }),
         sb.from("cars").select("*"),
         sb.from("orders").select("*, order_status_history(*)").order("created_at", { ascending: false }),
-        sb.from("transactions").select("*").order("created_at", { ascending: false }).limit(500),
+        sb.from("transactions").select("*").order("created_at", { ascending: false }),
         sb.from("seamstress_payments").select("*"),
         sb.from("audit_log").select("*").order("created_at", { ascending: false }).limit(200),
         sb.from("notifications").select("*").eq("user_id", user.id).order("created_at", { ascending: false }).limit(50),
       ]);
+
+      const remoteTransactions = (transactions || []).map(mapTransactionRow);
+      const remoteTransactionIds = new Set(remoteTransactions.map(item => item.id));
+      const pendingTransactions = readFinanceOutbox().filter(item => !remoteTransactionIds.has(item.id));
+      const allTransactions = [...pendingTransactions, ...remoteTransactions]
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      const rawAccounts: Account[] = (accounts || []).map(a => ({
+        id: a.id, name: a.name, type: a.type, icon: a.icon || "💳",
+        balance: Number(a.balance), initialBalance: Number(a.initial_balance),
+        active: a.active, showInTotal: a.show_in_total, order: a.sort_order,
+      }));
 
       setData({
         users: (profiles || []).map(p => ({
@@ -461,11 +531,7 @@ function useSupabaseData(): AppData {
           id: s.id, key: s.key, label: s.label, color: s.color,
           isFinal: s.is_final, order: s.sort_order,
         })),
-        accounts: (accounts || []).map(a => ({
-          id: a.id, name: a.name, type: a.type, icon: a.icon || "💳",
-          balance: Number(a.balance), initialBalance: Number(a.initial_balance),
-          active: a.active, showInTotal: a.show_in_total, order: a.sort_order,
-        })),
+        accounts: applyLedgerBalances(rawAccounts, allTransactions),
         expenseCategories: (categories || []).filter(c => c.type === "expense").map(c => ({
           id: c.id, name: c.name, type: c.type as "expense", icon: c.icon || "📦",
           color: c.color || "#9CA39A", active: c.active, order: c.sort_order,
@@ -485,15 +551,7 @@ function useSupabaseData(): AppData {
         clients: (clients || []).map(mapClientRow),
         cars: (cars || []).map(mapCarRow),
         orders: (rawOrders || []).map(mapOrderRow),
-        transactions: (transactions || []).map(t => ({
-          id: t.id, type: t.type, amount: Number(t.amount),
-          categoryId: t.category_id, accountId: t.account_id,
-          toAccountId: t.to_account_id, orderId: t.order_id,
-          clientId: t.client_id, paymentType: t.payment_type,
-          description: t.description, receiptPhoto: t.receipt_photo,
-          userId: t.user_id, userName: t.user_name || "",
-          createdAt: t.created_at,
-        })),
+        transactions: allTransactions,
         seamstressPayments: (seamstressPayments || []).map(sp => ({
           id: sp.id, orderId: sp.order_id, amount: Number(sp.amount),
           status: sp.status, paidAt: sp.paid_at, paidBy: sp.paid_by,
@@ -826,37 +884,25 @@ function useSupabaseData(): AppData {
   const createTransaction = useCallback(async (tx: Partial<Transaction>): Promise<Transaction | null> => {
     const sb = getSupabase();
     if (!sb) return null;
-
-    const { data: created, error } = await sb.from("transactions").insert({
-      type: tx.type, amount: tx.amount, category_id: tx.categoryId,
-      account_id: tx.accountId, to_account_id: tx.toAccountId,
-      order_id: tx.orderId, client_id: tx.clientId,
-      payment_type: tx.paymentType, description: tx.description,
-      user_id: tx.userId, user_name: tx.userName,
-    }).select().single();
-
-    if (error) { console.error("Create transaction error:", error); return null; }
-
-    // Update account balance
-    if (tx.accountId && tx.amount) {
-      if (tx.type === "income") {
-        await sb.rpc("increment_balance", { acc_id: tx.accountId, val: tx.amount });
-      } else if (tx.type === "expense") {
-        await sb.rpc("increment_balance", { acc_id: tx.accountId, val: -tx.amount });
-      } else if (tx.type === "transfer" && tx.toAccountId) {
-        await sb.rpc("increment_balance", { acc_id: tx.accountId, val: -tx.amount });
-        await sb.rpc("increment_balance", { acc_id: tx.toAccountId, val: tx.amount });
-      }
-    }
+    if (!tx.type || !tx.amount || !tx.accountId) return null;
 
     const transaction = {
       ...tx,
-      id: created.id,
-      createdAt: created.created_at || new Date().toISOString(),
+      id: tx.id || crypto.randomUUID(),
+      createdAt: tx.createdAt || new Date().toISOString(),
     } as Transaction;
+
+    const queued = readFinanceOutbox();
+    if (!queued.some(item => item.id === transaction.id)) {
+      writeFinanceOutbox([...queued, transaction]);
+    }
+
+    // Update the screen immediately. A stable id makes every retry idempotent.
     setData(prev => ({
       ...prev,
-      transactions: [transaction, ...prev.transactions],
+      transactions: prev.transactions.some(item => item.id === transaction.id)
+        ? prev.transactions
+        : [transaction, ...prev.transactions],
       accounts: prev.accounts.map(account => {
         if (!tx.amount) return account;
         if (account.id === tx.accountId) {
@@ -869,8 +915,52 @@ function useSupabaseData(): AppData {
         return account;
       }),
     }));
+
+    // The transaction ledger is the source of truth for balances. This is one
+    // request instead of insert + one or two sequential balance mutations.
+    const { error } = await sb.from("transactions").upsert(
+      transactionPayload(transaction),
+      { onConflict: "id", ignoreDuplicates: true },
+    );
+
+    if (error) {
+      console.error("Create transaction error; queued for retry:", error);
+      return transaction;
+    }
+
+    writeFinanceOutbox(readFinanceOutbox().filter(item => item.id !== transaction.id));
     return transaction;
   }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    const flush = async () => {
+      const sb = getSupabase();
+      const pending = readFinanceOutbox();
+      if (!sb || !pending.length) return;
+      const savedIds: string[] = [];
+      for (const transaction of pending) {
+        const { error } = await sb.from("transactions").upsert(
+          transactionPayload(transaction),
+          { onConflict: "id", ignoreDuplicates: true },
+        );
+        if (!error) savedIds.push(transaction.id);
+      }
+      if (savedIds.length) {
+        writeFinanceOutbox(readFinanceOutbox().filter(item => !savedIds.includes(item.id)));
+      }
+    };
+    const retry = () => void flush();
+    void flush();
+    window.addEventListener("online", retry);
+    window.addEventListener("focus", retry);
+    const interval = window.setInterval(retry, 30000);
+    return () => {
+      window.removeEventListener("online", retry);
+      window.removeEventListener("focus", retry);
+      window.clearInterval(interval);
+    };
+  }, [user]);
 
   const createCar = useCallback(async (c: Partial<Car>): Promise<Car | null> => {
     const sb = getSupabase();
