@@ -592,9 +592,12 @@ function useSupabaseData(): AppData {
     if (!sb) return null;
 
     const num = o.number?.trim() || `${new Date().getDate().toString().padStart(2,"0")}${(new Date().getMonth()+1).toString().padStart(2,"0")}-${Math.floor(Math.random()*900)+100}`;
+    const orderId = o.id || crypto.randomUUID();
+    const createdAt = new Date().toISOString();
     const initialStatus: OrderStatus = "new";
 
-    const { data: created, error } = await sb.from("orders").insert({
+    const { error } = await sb.from("orders").insert({
+      id: orderId,
       number: num,
       client_id: o.clientId,
       car_id: o.carId,
@@ -621,7 +624,7 @@ function useSupabaseData(): AppData {
       material_cost: o.materialCost || 0,
       other_costs: o.otherCosts || 0,
       created_by: user?.id || null,
-    }).select().single();
+    });
 
     if (error) {
       if (error.code === "23505") {
@@ -631,36 +634,31 @@ function useSupabaseData(): AppData {
       console.error("Create order error:", error);
       throw new Error(error.message || "Не удалось создать заказ");
     }
-    if (!created) throw new Error("Сервер не вернул созданный заказ");
     const order: Order = {
       ...o,
-      id: created.id,
-      number: created.number,
-      clientId: created.client_id,
-      carId: created.car_id,
-      status: created.status,
-      kitTypes: created.kit_types || [],
-      materialColor: created.material_color || "",
-      edgeColor: created.edge_color || "",
-      stitchColor: created.stitch_color || "",
-      extras: created.extras || undefined,
-      layoutImage: created.layout_image || undefined,
-      photos: created.photos || [],
-      assigneeId: created.assignee_id,
-      priority: created.priority || "normal",
-      createdById: created.created_by,
-      createdAt: created.created_at,
-      desiredDate: created.desired_date,
-      totalPrice: Number(created.total_price || 0),
-      prepayment: Number(created.prepayment || 0),
-      paid: Number(created.paid || 0),
-      remaining: Number(created.remaining || 0),
-      seamstressPayment: Number(created.seamstress_payment || 0),
-      seamstressPaymentStatus: created.seamstress_payment_status || "planned",
-      chineseCost: Number(created.chinese_cost || 0),
-      materialCost: Number(created.material_cost || 0),
-      otherCosts: Number(created.other_costs || 0),
-      plannedProfit: Number(created.planned_profit || 0),
+      id: orderId,
+      number: num,
+      clientId: o.clientId!,
+      carId: o.carId!,
+      status: initialStatus,
+      kitTypes: o.kitTypes || [],
+      materialColor: o.materialColor || "",
+      edgeColor: o.edgeColor || "",
+      stitchColor: o.stitchColor || "",
+      photos: o.photos || [],
+      priority: o.priority || "normal",
+      createdById: user?.id,
+      createdAt,
+      totalPrice: Number(o.totalPrice || 0),
+      prepayment: Number(o.prepayment || 0),
+      paid: Number(o.prepayment || 0),
+      remaining: Number(o.totalPrice || 0) - Number(o.prepayment || 0),
+      seamstressPayment: Number(o.seamstressPayment || 0),
+      seamstressPaymentStatus: "planned",
+      chineseCost: Number(o.chineseCost || 0),
+      materialCost: Number(o.materialCost || 0),
+      otherCosts: Number(o.otherCosts || 0),
+      plannedProfit: Number(o.totalPrice || 0) - Number(o.seamstressPayment || 0) - Number(o.chineseCost || 0) - Number(o.materialCost || 0) - Number(o.otherCosts || 0),
       statusHistory: [],
     } as Order;
     setData(prev => ({ ...prev, orders: [order, ...prev.orders] }));
@@ -781,15 +779,26 @@ function useSupabaseData(): AppData {
   const createClient = useCallback(async (c: Partial<Client>): Promise<Client | null> => {
     const sb = getSupabase();
     if (!sb) return null;
+    const clientId = c.id || crypto.randomUUID();
+    const createdAt = new Date().toISOString();
 
-    const { data: created, error } = await sb.from("clients").insert({
+    const { error } = await sb.from("clients").insert({
+      id: clientId,
       name: c.name, phone: c.phone, phone2: c.phone2,
       messenger: c.messenger, comment: c.comment, source: c.source,
-    }).select().single();
+    });
 
-    if (error) { console.error("Create client error:", error); throw new Error(error.message || "Не удалось создать клиента"); }
-    if (!created) throw new Error("Сервер не вернул созданного клиента");
-    const client = { ...c, id: created.id, createdAt: created.created_at } as Client;
+    if (error) {
+      if (error.code === "23505") {
+        const { data: existingById } = await sb.from("clients").select("*").eq("id", clientId).maybeSingle();
+        if (existingById) return mapClientRow(existingById);
+        const { data: existingByPhone } = await sb.from("clients").select("*").eq("phone", c.phone).maybeSingle();
+        if (existingByPhone) return mapClientRow(existingByPhone);
+      }
+      console.error("Create client error:", error);
+      throw new Error(error.message || "Не удалось создать клиента");
+    }
+    const client = { ...c, id: clientId, createdAt } as Client;
     setData(prev => ({ ...prev, clients: [client, ...prev.clients] }));
     return client;
   }, []);
@@ -866,16 +875,24 @@ function useSupabaseData(): AppData {
   const createCar = useCallback(async (c: Partial<Car>): Promise<Car | null> => {
     const sb = getSupabase();
     if (!sb) return null;
+    const carId = c.id || crypto.randomUUID();
 
-    const { data: created, error } = await sb.from("cars").insert({
+    const { error } = await sb.from("cars").insert({
+      id: carId,
       client_id: c.clientId, brand: c.brand, model: c.model,
       generation: c.generation, year: c.year, body: c.body,
       plate_number: c.plateNumber, comment: c.comment,
-    }).select().single();
+    });
 
-    if (error) { console.error("Create car error:", error); throw new Error(error.message || "Не удалось создать автомобиль"); }
-    if (!created) throw new Error("Сервер не вернул созданный автомобиль");
-    const car = { ...c, id: created.id } as Car;
+    if (error) {
+      if (error.code === "23505") {
+        const { data: existing } = await sb.from("cars").select("*").eq("id", carId).maybeSingle();
+        if (existing) return mapCarRow(existing);
+      }
+      console.error("Create car error:", error);
+      throw new Error(error.message || "Не удалось создать автомобиль");
+    }
+    const car = { ...c, id: carId } as Car;
     setData(prev => ({ ...prev, cars: [car, ...prev.cars] }));
     return car;
   }, []);

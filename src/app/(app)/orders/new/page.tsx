@@ -70,6 +70,9 @@ export default function NewOrderPage() {
   const prefillApplied = useRef(false);
   const newDraftLoaded = useRef(false);
   const orderNumber = useRef(createDraftOrderNumber());
+  const clientDraftId = useRef(crypto.randomUUID());
+  const carDraftId = useRef(crypto.randomUUID());
+  const orderDraftId = useRef(crypto.randomUUID());
 
   useEffect(() => {
     const warn = (event: BeforeUnloadEvent) => {
@@ -148,6 +151,7 @@ export default function NewOrderPage() {
     }));
     if (markDirty) setDirty(true);
     setSaveError(null);
+    carDraftId.current = crypto.randomUUID();
   };
 
   const selectCar = (car: ClientCar, markDirty = true) => {
@@ -167,6 +171,7 @@ export default function NewOrderPage() {
   };
 
   const startNewCar = () => {
+    carDraftId.current = crypto.randomUUID();
     setForm(prev => ({
       ...prev,
       existingCarId: "",
@@ -222,13 +227,16 @@ export default function NewOrderPage() {
     try {
       const saved = window.localStorage.getItem(`kovron-new-order-draft-${user.id}`);
       if (!saved) return;
-      const draft = JSON.parse(saved) as { form?: Partial<typeof form>; clientId?: string; step?: number; orderNumber?: string };
+      const draft = JSON.parse(saved) as { form?: Partial<typeof form>; clientId?: string; step?: number; orderNumber?: string; clientDraftId?: string; carDraftId?: string; orderDraftId?: string };
       setForm(prev => ({ ...prev, ...(draft.form || {}) }));
       const draftClient = clients.find(client => client.id === draft.clientId);
       if (draftClient) setExistingClient(draftClient);
       else setCreatingNewClient(true);
       if (typeof draft.step === "number") setStep(Math.min(Math.max(draft.step, 0), steps.length - 1));
       if (draft.orderNumber) orderNumber.current = draft.orderNumber;
+      if (draft.clientDraftId) clientDraftId.current = draft.clientDraftId;
+      if (draft.carDraftId) carDraftId.current = draft.carDraftId;
+      if (draft.orderDraftId) orderDraftId.current = draft.orderDraftId;
       setDirty(true);
       setDraftRestored(true);
     } catch {
@@ -241,7 +249,9 @@ export default function NewOrderPage() {
     const timer = window.setTimeout(() => {
       try {
         window.localStorage.setItem(`kovron-new-order-draft-${user.id}`, JSON.stringify({
-          form, clientId: existingClient?.id, step, orderNumber: orderNumber.current, updatedAt: new Date().toISOString(),
+          form, clientId: existingClient?.id, step, orderNumber: orderNumber.current,
+          clientDraftId: clientDraftId.current, carDraftId: carDraftId.current, orderDraftId: orderDraftId.current,
+          updatedAt: new Date().toISOString(),
         }));
       } catch {
         // The order can still be saved to the server if local draft storage is full.
@@ -299,13 +309,14 @@ export default function NewOrderPage() {
       if (!clientId && form.clientName && form.clientPhone) {
         setSavingStage("Сохраняем клиента…");
         const newClient = await withTimeout(createClient({
+          id: clientDraftId.current,
           name: form.clientName,
           phone: form.clientPhone,
           phone2: form.clientPhone2 || undefined,
           messenger: form.clientMessenger || undefined,
           comment: form.clientComment || undefined,
           source: form.clientSource || undefined,
-        }), 20000, "Сохранение клиента");
+        }), 60000, "Сохранение клиента");
         clientId = newClient?.id;
         if (newClient) {
           setExistingClient(newClient);
@@ -318,6 +329,7 @@ export default function NewOrderPage() {
       if (!carId && clientId && form.carBrand && form.carModel) {
         setSavingStage("Сохраняем автомобиль…");
         const newCar = await withTimeout(createCar({
+          id: carDraftId.current,
           clientId,
           brand: form.carBrand,
           model: form.carModel,
@@ -326,7 +338,7 @@ export default function NewOrderPage() {
           body: form.carBody || undefined,
           plateNumber: form.carPlateNumber || undefined,
           comment: form.carComment || undefined,
-        }), 20000, "Сохранение автомобиля");
+        }), 60000, "Сохранение автомобиля");
         carId = newCar?.id;
         if (newCar) setForm(prev => ({ ...prev, existingCarId: newCar.id }));
       }
@@ -337,6 +349,7 @@ export default function NewOrderPage() {
 
       setSavingStage("Создаём заказ…");
       const order = await withTimeout(createOrder({
+        id: orderDraftId.current,
         number: orderNumber.current,
         createdById: user?.id,
         clientId,
@@ -354,7 +367,7 @@ export default function NewOrderPage() {
         chineseCost: chineseCost,
         materialCost: materialCost,
         otherCosts: otherCosts,
-      }), 25000, "Создание заказа");
+      }), 60000, "Создание заказа");
 
       if (order) {
         if (user) window.localStorage.removeItem(`kovron-new-order-draft-${user.id}`);
@@ -431,6 +444,8 @@ export default function NewOrderPage() {
                       setExistingClient(null);
                       setCreatingNewClient(false);
                       setClientSearch("");
+                      clientDraftId.current = crypto.randomUUID();
+                      carDraftId.current = crypto.randomUUID();
                       setForm(prev => ({ ...prev, clientName: "", clientPhone: "", clientPhone2: "", clientMessenger: "", clientComment: "", clientSource: "", existingCarId: "", carBrand: "", carModel: "", carGeneration: "", carYear: "", carBody: "", carPlateNumber: "", carComment: "" }));
                     }} className="p-2 rounded-sm hover:bg-background" aria-label="Выбрать другого клиента"><X className="h-4 w-4" /></button>
                   </div>
@@ -463,6 +478,8 @@ export default function NewOrderPage() {
                     <Button type="button" variant="outline" className="w-full" onClick={() => {
                       const value = clientSearch.trim();
                       const looksLikePhone = normalizePhone(value).length >= 5;
+                      clientDraftId.current = crypto.randomUUID();
+                      carDraftId.current = crypto.randomUUID();
                       setCreatingNewClient(true);
                       setForm(prev => ({ ...prev, clientName: looksLikePhone ? "" : value, clientPhone: looksLikePhone ? value : "" }));
                     }}><Plus className="h-4 w-4 mr-2" />Создать нового клиента</Button>
