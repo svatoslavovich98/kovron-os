@@ -31,7 +31,8 @@ export function OrderPhotoPicker({
     setUploading(true);
     setError(null);
     try {
-      const uploaded = await Promise.all(selected.map(file => uploadOrderMedia(file, kind, orderId)));
+      const uploaded: string[] = [];
+      for (const file of selected) uploaded.push(await uploadOrderMedia(file, kind, orderId));
       onChange([...urls, ...uploaded]);
     } catch (uploadError) {
       setError(uploadError instanceof Error ? uploadError.message : "Не удалось загрузить фотографию");

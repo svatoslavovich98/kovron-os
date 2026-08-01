@@ -12,7 +12,7 @@ function safeExtension(file: File) {
   return "jpg";
 }
 
-function fileToDataUrl(file: File): Promise<string> {
+function fileToDataUrl(file: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(String(reader.result));
@@ -21,11 +21,39 @@ function fileToDataUrl(file: File): Promise<string> {
   });
 }
 
+function tagDataUrl(url: string, kind: OrderMediaKind) {
+  return url.replace(/^data:([^;,]+)/, `data:$1;kovron-kind=${kind}`);
+}
+
+async function imageToCompactDataUrl(file: File, kind: OrderMediaKind): Promise<string> {
+  try {
+    const bitmap = await createImageBitmap(file);
+    const maxSide = 1400;
+    const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+    canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("Не удалось подготовить фотографию");
+    context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    bitmap.close();
+    const blob = await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob(result => result ? resolve(result) : reject(new Error("Не удалось уменьшить фотографию")), "image/jpeg", 0.72);
+    });
+    return tagDataUrl(await fileToDataUrl(blob), kind);
+  } catch {
+    if (file.size > 2 * 1024 * 1024) {
+      throw new Error("Не удалось подготовить фотографию. Выберите изображение размером до 2 МБ");
+    }
+    return tagDataUrl(await fileToDataUrl(file), kind);
+  }
+}
+
 export async function uploadOrderMedia(file: File, kind: OrderMediaKind, orderId?: string): Promise<string> {
   if (!file.type.startsWith("image/")) throw new Error("Можно загружать только изображения");
   if (file.size > 12 * 1024 * 1024) throw new Error("Размер фотографии не должен превышать 12 МБ");
 
-  if (!isSupabaseMode) return fileToDataUrl(file);
+  if (!isSupabaseMode) return imageToCompactDataUrl(file, kind);
 
   const sb = getSupabase();
   if (!sb) throw new Error("Хранилище фотографий недоступно");
@@ -36,15 +64,15 @@ export async function uploadOrderMedia(file: File, kind: OrderMediaKind, orderId
     contentType: file.type,
     upsert: false,
   });
-  if (error) throw new Error(`Не удалось загрузить фотографию: ${error.message}`);
+  if (error) return imageToCompactDataUrl(file, kind);
   const { data } = sb.storage.from(BUCKET).getPublicUrl(path);
   return data.publicUrl;
 }
 
 export function isSalonPhoto(url: string) {
-  return url.includes("/salon/");
+  return url.includes("/salon/") || url.includes("kovron-kind=salon");
 }
 
 export function isFinishedPhoto(url: string) {
-  return url.includes("/finished/");
+  return url.includes("/finished/") || url.includes("kovron-kind=finished");
 }
