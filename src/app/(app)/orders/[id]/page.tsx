@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Avatar } from "@/components/ui/avatar";
 import { formatCurrency, formatDate, formatDateTime, cn } from "@/lib/utils";
@@ -14,7 +15,7 @@ import { ReceivePaymentDialog } from "@/components/receive-payment-dialog";
 import type { OrderStatus } from "@/lib/types";
 import {
   ArrowLeft, Phone, MessageCircle, Calendar, Clock,
-  User, Wallet, Package, Loader2, ChevronsUpDown, UserRound, Pencil, Printer,
+  User, Wallet, Package, Loader2, ChevronsUpDown, UserRound, Pencil, Printer, CopyPlus,
 } from "lucide-react";
 
 export default function OrderDetailPage({ params }: { params: { id: string } }) {
@@ -122,6 +123,10 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
               {order.kitTypes.map((kit) => (
                 <Badge key={kit} variant="outline">{kitLabels[kit] || kit}</Badge>
               ))}
+            </div>
+            <div className="grid grid-cols-2 gap-2 pt-3">
+              {client && <Link href={`/clients/${client.id}`}><Button variant="outline" size="sm" className="w-full"><User className="h-3.5 w-3.5 mr-1.5" />История клиента</Button></Link>}
+              <Link href={`/orders/new?repeatOrderId=${order.id}`}><Button variant="outline" size="sm" className="w-full"><CopyPlus className="h-3.5 w-3.5 mr-1.5" />Повторить заказ</Button></Link>
             </div>
           </div>
         </CardContent>
