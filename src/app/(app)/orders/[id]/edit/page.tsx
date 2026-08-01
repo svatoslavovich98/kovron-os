@@ -30,7 +30,7 @@ export default function EditOrderPage({ params }: { params: { id: string } }) {
     clientName: "", clientPhone: "", clientPhone2: "", clientMessenger: "", clientComment: "", clientSource: "",
     carBrand: "", carModel: "", carGeneration: "", carYear: "", carBody: "", carPlateNumber: "", carComment: "",
     kitTypes: [] as KitType[], assigneeId: "", desiredDate: "", priority: "normal",
-    totalPrice: "", seamstressPayment: "", chineseCost: "", materialCost: "", otherCosts: "",
+    totalPrice: "", prepayment: "", seamstressPayment: "", chineseCost: "", materialCost: "", otherCosts: "",
     seamstressComment: "", layoutPhotos: [] as string[], salonPhotos: [] as string[],
   });
 
@@ -42,7 +42,8 @@ export default function EditOrderPage({ params }: { params: { id: string } }) {
       carBrand: car.brand || "", carModel: car.model || "", carGeneration: car.generation || "",
       carYear: car.year ? String(car.year) : "", carBody: car.body || "", carPlateNumber: car.plateNumber || "", carComment: car.comment || "",
       kitTypes: order.kitTypes, assigneeId: order.assigneeId || "", desiredDate: order.desiredDate || "", priority: order.priority,
-      totalPrice: String(order.totalPrice || ""), seamstressPayment: String(order.seamstressPayment || ""),
+      totalPrice: String(order.totalPrice || ""), prepayment: String(order.prepayment || ""),
+      seamstressPayment: String(order.seamstressPayment || ""),
       chineseCost: String(order.chineseCost || ""), materialCost: String(order.materialCost || ""), otherCosts: String(order.otherCosts || ""),
       seamstressComment: order.seamstressComment || "", layoutPhotos: order.layoutImage ? [order.layoutImage] : [], salonPhotos: initialSalonPhotos,
     });
@@ -75,6 +76,18 @@ export default function EditOrderPage({ params }: { params: { id: string } }) {
       setMessage("Заполните имя и телефон клиента, марку и модель автомобиля");
       return;
     }
+    const totalPrice = Number(form.totalPrice) || 0;
+    const prepayment = Number(form.prepayment) || 0;
+    const paidWithoutPrepayment = Math.max(0, order.paid - order.prepayment);
+    const paid = paidWithoutPrepayment + prepayment;
+    if (totalPrice < 0 || prepayment < 0) {
+      setMessage("Стоимость и предоплата не могут быть отрицательными");
+      return;
+    }
+    if (paid > totalPrice) {
+      setMessage(`Общая оплаченная сумма (${paid.toLocaleString("ru-RU")} ₽) не может быть больше стоимости заказа`);
+      return;
+    }
     setSaving(true);
     setMessage(null);
     const clientChanged = form.clientName.trim() !== client.name || form.clientPhone.trim() !== client.phone || form.clientPhone2 !== (client.phone2 || "") || form.clientMessenger !== (client.messenger || "") || form.clientComment !== (client.comment || "") || form.clientSource !== (client.source || "");
@@ -92,7 +105,8 @@ export default function EditOrderPage({ params }: { params: { id: string } }) {
       updateOrder(order.id, {
         kitTypes: form.kitTypes, assigneeId: form.assigneeId || null,
         desiredDate: form.desiredDate || null, priority: form.priority as typeof order.priority,
-        totalPrice: Number(form.totalPrice) || 0, seamstressPayment: Number(form.seamstressPayment) || 0,
+        totalPrice, prepayment, paid, remaining: totalPrice - paid,
+        seamstressPayment: Number(form.seamstressPayment) || 0,
         chineseCost: Number(form.chineseCost) || 0, materialCost: Number(form.materialCost) || 0, otherCosts: Number(form.otherCosts) || 0,
         seamstressComment: form.seamstressComment, layoutImage: form.layoutPhotos[0] || null,
         photos: [...form.salonPhotos, ...finishedPhotos],
@@ -182,11 +196,13 @@ export default function EditOrderPage({ params }: { params: { id: string } }) {
         <h2 className="font-semibold">Финансы</h2>
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
           <Field label="Стоимость заказа"><Input type="number" value={form.totalPrice} onChange={e => update("totalPrice", e.target.value)} /></Field>
+          <Field label="Предоплата"><Input type="number" min="0" value={form.prepayment} onChange={e => update("prepayment", e.target.value)} /></Field>
           <Field label="Оплата Оксане"><Input type="number" value={form.seamstressPayment} onChange={e => update("seamstressPayment", e.target.value)} /></Field>
           <Field label="Оплата китайцам"><Input type="number" value={form.chineseCost} onChange={e => update("chineseCost", e.target.value)} /></Field>
           <Field label="Материалы"><Input type="number" value={form.materialCost} onChange={e => update("materialCost", e.target.value)} /></Field>
           <Field label="Другие расходы"><Input type="number" value={form.otherCosts} onChange={e => update("otherCosts", e.target.value)} /></Field>
         </div>
+        <p className="text-xs text-muted-foreground">Это учёт уже полученной предоплаты. Изменение суммы не проводит оплату через приложение и не создаёт операцию в кассе.</p>
       </CardContent></Card>
 
       <div className="fixed bottom-16 lg:bottom-4 left-4 right-4 lg:left-auto z-40 flex justify-end pointer-events-none">

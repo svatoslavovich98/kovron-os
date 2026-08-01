@@ -112,7 +112,7 @@ const DataContext = createContext<AppData | null>(null);
 const orderFieldLabels: Partial<Record<keyof Order, string>> = {
   clientId: "клиент", carId: "автомобиль", status: "статус", kitTypes: "комплект",
   assigneeId: "исполнитель", priority: "приоритет", desiredDate: "срок",
-  totalPrice: "стоимость", prepayment: "предоплата", paid: "оплаченная сумма",
+  totalPrice: "стоимость", prepayment: "предоплата", paid: "оплаченная сумма", remaining: "остаток долга",
   seamstressPayment: "оплата Оксане", chineseCost: "оплата китайцам",
   materialCost: "расходы на материалы", otherCosts: "прочие расходы",
   seamstressComment: "комментарий для Оксаны", layoutImage: "раскладка", photos: "фотографии",
