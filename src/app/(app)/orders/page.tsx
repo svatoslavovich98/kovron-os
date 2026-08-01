@@ -12,42 +12,44 @@ import { useData } from "@/lib/data-context";
 import type { Order, OrderStatus } from "@/lib/types";
 import {
   Plus, Search, LayoutGrid, List, Columns3, ChevronRight, Calendar,
-  UserRound, Loader2, Download, Archive, SlidersHorizontal, Phone,
+  UserRound, Loader2, Download, SlidersHorizontal, Phone,
   Images, AlertTriangle, Check, X, WalletCards,
 } from "lucide-react";
 
 const statusFilters: { key: string; label: string }[] = [
   { key: "all", label: "Все" },
   { key: "new", label: "Новые" },
-  { key: "pending_prepayment", label: "Ожидают предоплату" },
   { key: "in_progress", label: "В работе" },
   { key: "ready", label: "Готовы" },
-  { key: "pending_delivery", label: "Ожидают выдачи" },
-  { key: "completed", label: "Завершены" },
+  { key: "completed", label: "Завершённые" },
   { key: "cancelled", label: "Отменены" },
   { key: "has_debt", label: "Есть долг" },
 ];
 
 const mobileTabs = [
-  { key: "all", label: "Все" },
+  { key: "all", label: "Активные" },
   { key: "new", label: "Новые" },
   { key: "in_progress", label: "В работе" },
   { key: "ready", label: "Готовы" },
+  { key: "completed", label: "Завершённые" },
+  { key: "cancelled", label: "Отменённые" },
 ] as const;
 
 type MobileTab = (typeof mobileTabs)[number]["key"];
 type ViewMode = "cards" | "compact" | "board";
 
 const finalStatuses: OrderStatus[] = ["completed", "cancelled", "delivered"];
-const newStatuses: OrderStatus[] = ["new", "pending_clarification", "pending_measurement", "measured", "pending_prepayment"];
-const workStatuses: OrderStatus[] = ["pending_production", "assigned", "in_progress", "paused"];
-const readyStatuses: OrderStatus[] = ["ready", "pending_delivery"];
+const newStatuses: OrderStatus[] = ["new"];
+const workStatuses: OrderStatus[] = ["in_progress"];
+const readyStatuses: OrderStatus[] = ["ready"];
 
-function matchesMobileTab(order: Order, tab: MobileTab, showArchive: boolean) {
+function matchesMobileTab(order: Order, tab: MobileTab) {
   if (tab === "new") return newStatuses.includes(order.status);
   if (tab === "in_progress") return workStatuses.includes(order.status);
   if (tab === "ready") return readyStatuses.includes(order.status);
-  return showArchive || !finalStatuses.includes(order.status);
+  if (tab === "completed") return order.status === "completed" || order.status === "delivered";
+  if (tab === "cancelled") return order.status === "cancelled";
+  return !finalStatuses.includes(order.status);
 }
 
 function isOverdue(order: Order) {
@@ -64,7 +66,6 @@ export default function OrdersPage() {
   const [mobileTab, setMobileTab] = useState<MobileTab>("all");
   const [view, setView] = useState<ViewMode>("cards");
   const [updatingId, setUpdatingId] = useState<string | null>(null);
-  const [showArchive, setShowArchive] = useState(false);
   const [mobileAssignee, setMobileAssignee] = useState("all");
   const [attentionOnly, setAttentionOnly] = useState(false);
   const [showMobileFilters, setShowMobileFilters] = useState(false);
@@ -97,25 +98,25 @@ export default function OrdersPage() {
         ? filtered.filter((order) => order.remaining > 0)
         : filtered.filter((order) => order.status === statusFilter);
     }
-    if (!showArchive && statusFilter === "all") {
+    if (statusFilter === "all") {
       filtered = filtered.filter((order) => !finalStatuses.includes(order.status));
     }
     return filtered.filter(matchesSearch);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enrichedOrders, search, statusFilter, showArchive]);
+  }, [enrichedOrders, search, statusFilter]);
 
   const mobileOrders = useMemo(() => enrichedOrders.filter((order) => {
-    if (!matchesMobileTab(order, mobileTab, showArchive) || !matchesSearch(order)) return false;
+    if (!matchesMobileTab(order, mobileTab) || !matchesSearch(order)) return false;
     if (mobileAssignee !== "all" && order.assigneeId !== mobileAssignee) return false;
     if (attentionOnly && !isOverdue(order) && order.remaining <= 0 && order.priority !== "urgent") return false;
     return true;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [enrichedOrders, mobileTab, showArchive, search, mobileAssignee, attentionOnly]);
+  }), [enrichedOrders, mobileTab, search, mobileAssignee, attentionOnly]);
 
   const tabCounts = useMemo(() => Object.fromEntries(mobileTabs.map((tab) => [
     tab.key,
-    enrichedOrders.filter((order) => matchesMobileTab(order, tab.key, showArchive)).length,
-  ])), [enrichedOrders, showArchive]);
+    enrichedOrders.filter((order) => matchesMobileTab(order, tab.key)).length,
+  ])), [enrichedOrders]);
 
   const selectedOrder = enrichedOrders.find((order) => order.id === statusOrderId);
 
@@ -166,7 +167,6 @@ export default function OrdersPage() {
         <div className="flex items-center gap-2">
           <div className="hidden lg:flex items-center gap-2">
             <Button variant="outline" size="sm" onClick={exportOrders}><Download className="h-4 w-4 mr-1" />Экспорт</Button>
-            <Button variant={showArchive ? "default" : "outline"} size="sm" onClick={() => setShowArchive((value) => !value)}><Archive className="h-4 w-4 mr-1" />Архив</Button>
           </div>
           <Link href="/orders/new"><Button size="sm" className="h-10 px-3 sm:px-4">
             <Plus className="h-4 w-4 sm:mr-1" />
@@ -189,24 +189,24 @@ export default function OrdersPage() {
           onClick={() => setShowMobileFilters(true)}
           className={cn(
             "lg:hidden relative h-11 w-11 shrink-0 rounded-md border flex items-center justify-center",
-            mobileAssignee !== "all" || attentionOnly || showArchive
+            mobileAssignee !== "all" || attentionOnly
               ? "border-primary bg-primary/10 text-primary"
               : "border-border bg-card text-muted-foreground"
           )}
           aria-label="Фильтры"
         >
           <SlidersHorizontal className="h-4 w-4" />
-          {(mobileAssignee !== "all" || attentionOnly || showArchive) && <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-primary" />}
+          {(mobileAssignee !== "all" || attentionOnly) && <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-primary" />}
         </button>
       </div>
 
-      <div className="lg:hidden grid grid-cols-4 gap-1 rounded-lg border border-border bg-card p-1">
+      <div className="lg:hidden flex gap-1 overflow-x-auto rounded-lg border border-border bg-card p-1" style={{ scrollbarWidth: "none" }}>
         {mobileTabs.map((tab) => (
           <button
             key={tab.key}
             onClick={() => setMobileTab(tab.key)}
             className={cn(
-              "min-w-0 rounded-md px-1 py-2 text-[11px] font-semibold transition-colors",
+              "min-w-[72px] flex-1 rounded-md px-2 py-2 text-[11px] font-semibold transition-colors",
               mobileTab === tab.key ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground"
             )}
           >
@@ -397,12 +397,8 @@ export default function OrdersPage() {
                 <div><p className="text-sm font-semibold">Требуют внимания</p><p className="text-xs text-muted-foreground">Просроченные, срочные или с долгом</p></div>
                 <span className={cn("flex h-6 w-11 items-center rounded-full p-0.5 transition-colors", attentionOnly ? "bg-primary" : "bg-muted")}><span className={cn("h-5 w-5 rounded-full bg-white shadow transition-transform", attentionOnly && "translate-x-5")} /></span>
               </button>
-              <button onClick={() => setShowArchive((value) => !value)} className="flex w-full items-center justify-between rounded-md border border-border bg-background p-3 text-left">
-                <div><p className="text-sm font-semibold">Показывать архив</p><p className="text-xs text-muted-foreground">Завершённые и отменённые заказы</p></div>
-                <span className={cn("flex h-6 w-11 items-center rounded-full p-0.5 transition-colors", showArchive ? "bg-primary" : "bg-muted")}><span className={cn("h-5 w-5 rounded-full bg-white shadow transition-transform", showArchive && "translate-x-5")} /></span>
-              </button>
             </div>
-            <div className="mt-5 flex gap-2"><Button variant="outline" className="flex-1" onClick={() => { setMobileAssignee("all"); setAttentionOnly(false); setShowArchive(false); }}>Сбросить</Button><Button className="flex-1" onClick={() => setShowMobileFilters(false)}>Показать {mobileOrders.length}</Button></div>
+            <div className="mt-5 flex gap-2"><Button variant="outline" className="flex-1" onClick={() => { setMobileAssignee("all"); setAttentionOnly(false); }}>Сбросить</Button><Button className="flex-1" onClick={() => setShowMobileFilters(false)}>Показать {mobileOrders.length}</Button></div>
           </div>
         </div>
       )}

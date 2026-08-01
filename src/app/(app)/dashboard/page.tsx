@@ -10,9 +10,8 @@ import { useData } from "@/lib/data-context";
 import { NotificationCenter } from "@/components/notification-center";
 import type { PeriodFilter } from "@/lib/types";
 import {
-  Plus, ShoppingBag, Factory, Clock, CheckCircle2,
+  Plus, ShoppingBag, Factory, CheckCircle2,
   AlertTriangle, Wallet, TrendingUp, TrendingDown, ArrowRight,
-  Package, Truck,
 } from "lucide-react";
 import Link from "next/link";
 import {
@@ -33,10 +32,10 @@ export default function DashboardPage() {
 
   // Order stats
   const newOrders = orders.filter((o) => o.status === "new").length;
-  const pendingProduction = orders.filter((o) => ["pending_production", "assigned"].includes(o.status)).length;
   const inProgress = orders.filter((o) => o.status === "in_progress").length;
   const ready = orders.filter((o) => o.status === "ready").length;
-  const pendingDelivery = orders.filter((o) => o.status === "pending_delivery").length;
+  const completed = orders.filter((o) => o.status === "completed" || o.status === "delivered").length;
+  const cancelled = orders.filter((o) => o.status === "cancelled").length;
   const overdue = orders.filter((o) => {
     if (!o.desiredDate || ["completed", "cancelled", "delivered"].includes(o.status)) return false;
     return new Date(o.desiredDate) < new Date();
@@ -114,21 +113,21 @@ export default function DashboardPage() {
     for (const o of orders) {
       if (["completed", "cancelled"].includes(o.status)) continue;
 
-      if (["ready", "pending_delivery"].includes(o.status)) {
+      if (o.status === "ready") {
         tasks.push({
           text: `Выдать ${carLabel(o.carId)} — заказ №${o.number}`,
           type: "delivery",
           href: `/orders/${o.id}`,
         });
       }
-      if (o.desiredDate && new Date(o.desiredDate) <= today && !["ready", "pending_delivery", "delivered"].includes(o.status)) {
+      if (o.desiredDate && new Date(o.desiredDate) <= today && o.status !== "ready") {
         tasks.push({
           text: `Срок подошёл: ${carLabel(o.carId)} — заказ №${o.number}`,
           type: "check",
           href: `/orders/${o.id}`,
         });
       }
-      if (o.remaining > 0 && ["delivered", "ready", "pending_delivery"].includes(o.status)) {
+      if (o.remaining > 0 && ["ready", "completed", "delivered"].includes(o.status)) {
         tasks.push({
           text: `Получить остаток ${formatCurrency(o.remaining)} — заказ №${o.number}`,
           type: "payment",
@@ -187,10 +186,10 @@ export default function DashboardPage() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {[
           { label: "Новые", value: newOrders, icon: ShoppingBag, color: "text-info" },
-          { label: "Ожидают произв.", value: pendingProduction, icon: Clock, color: "text-warning" },
           { label: "В работе", value: inProgress, icon: Factory, color: "text-primary" },
           { label: "Готовы", value: ready, icon: CheckCircle2, color: "text-income" },
-          { label: "Ожидают выдачи", value: pendingDelivery, icon: Truck, color: "text-income" },
+          { label: "Завершённые", value: completed, icon: CheckCircle2, color: "text-income" },
+          { label: "Отменённые", value: cancelled, icon: AlertTriangle, color: "text-muted-foreground" },
           { label: "Просрочены", value: overdue, icon: AlertTriangle, color: "text-expense" },
           { label: "Ожидают оплаты", value: pendingPayment, icon: Wallet, color: "text-warning" },
           { label: "Долг клиентов", value: formatCurrency(totalDebt), icon: TrendingDown, color: "text-expense", isAmount: true },

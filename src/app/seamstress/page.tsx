@@ -43,7 +43,7 @@ export default function SeamstressCabinet() {
     }));
 
   const inProgress = myOrders.filter((o) => o.status === "in_progress").length;
-  const waiting = myOrders.filter((o) => o.status === "assigned").length;
+  const waiting = myOrders.filter((o) => o.status === "new" || o.status === "assigned" || o.status === "pending_production").length;
   const readyCount = myOrders.filter((o) => o.status === "ready" || o.status === "pending_delivery").length;
 
   const earnings = {
@@ -53,7 +53,7 @@ export default function SeamstressCabinet() {
   };
 
   const filteredOrders = myOrders.filter((o) => {
-    if (activeTab === "assigned") return o.status === "assigned" || o.status === "pending_production";
+    if (activeTab === "assigned") return o.status === "new" || o.status === "assigned" || o.status === "pending_production";
     if (activeTab === "in_progress") return o.status === "in_progress" || o.status === "paused";
     return o.status === "ready" || o.status === "pending_delivery";
   });
@@ -219,7 +219,7 @@ export default function SeamstressCabinet() {
 
                       {/* Action buttons */}
                       <div className="space-y-2">
-                        {order.status === "assigned" && (
+                        {(order.status === "new" || order.status === "assigned" || order.status === "pending_production") && (
                           <Button className="w-full h-14 text-base" disabled={workingId === order.id} onClick={() => void moveOrder(order.id, "in_progress")}>
                             {workingId === order.id ? <Loader2 className="h-5 w-5 mr-2 animate-spin" /> : <Play className="h-5 w-5 mr-2" />}
                             {workingId === order.id ? "Сохранение…" : "Начать работу"}

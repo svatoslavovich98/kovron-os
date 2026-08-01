@@ -54,11 +54,12 @@ export function NotificationCenter() {
     const today = now.toISOString().slice(0, 10);
     const result: AlertItem[] = [];
     for (const order of orders) {
-      if (["completed", "cancelled"].includes(order.status)) continue;
+      if (order.status === "cancelled") continue;
+      const isActive = order.status !== "completed" && order.status !== "delivered";
       const car = cars.find(item => item.id === order.carId);
       const carName = car ? `${car.brand} ${car.model}` : `заказ №${order.number}`;
 
-      if (order.desiredDate && order.desiredDate.slice(0, 10) < today && !["ready", "pending_delivery", "delivered"].includes(order.status)) {
+      if (isActive && order.desiredDate && order.desiredDate.slice(0, 10) < today && order.status !== "ready") {
         result.push({
           id: `deadline:${order.id}`,
           title: "Просрочен срок",
@@ -69,7 +70,7 @@ export function NotificationCenter() {
           read: dismissed.includes(`deadline:${order.id}`),
         });
       }
-      if (order.desiredDate?.slice(0, 10) === today && !["completed", "cancelled", "delivered"].includes(order.status)) {
+      if (isActive && order.desiredDate?.slice(0, 10) === today) {
         result.push({
           id: `today:${order.id}`,
           title: "Сегодня срок готовности",
@@ -80,18 +81,7 @@ export function NotificationCenter() {
           read: dismissed.includes(`today:${order.id}`),
         });
       }
-      if (order.status === "pending_prepayment") {
-        result.push({
-          id: `prepayment:${order.id}`,
-          title: "Ожидается предоплата",
-          message: `${carName}, заказ №${order.number}`,
-          createdAt: order.createdAt,
-          orderId: order.id,
-          kind: "payment",
-          read: dismissed.includes(`prepayment:${order.id}`),
-        });
-      }
-      if (["ready", "pending_delivery"].includes(order.status)) {
+      if (order.status === "ready") {
         result.push({
           id: `ready:${order.id}`,
           title: "Заказ готов к выдаче",
@@ -102,7 +92,7 @@ export function NotificationCenter() {
           read: dismissed.includes(`ready:${order.id}`),
         });
       }
-      if (order.remaining > 0 && ["ready", "pending_delivery", "delivered"].includes(order.status)) {
+      if (order.remaining > 0 && ["ready", "completed", "delivered"].includes(order.status)) {
         result.push({
           id: `payment:${order.id}`,
           title: "Ожидается оплата",
@@ -114,7 +104,7 @@ export function NotificationCenter() {
         });
       }
       const lastChange = order.statusHistory.reduce((latest, item) => Math.max(latest, +new Date(item.timestamp)), +new Date(order.createdAt));
-      if (!["completed", "cancelled", "delivered"].includes(order.status) && now.getTime() - lastChange > 3 * 24 * 60 * 60 * 1000) {
+      if (isActive && now.getTime() - lastChange > 3 * 24 * 60 * 60 * 1000) {
         result.push({
           id: `stuck:${order.id}:${order.status}`,
           title: "Заказ давно без движения",

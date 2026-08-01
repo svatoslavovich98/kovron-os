@@ -17,6 +17,54 @@ import {
 import { getSupabase, isSupabaseMode } from "./supabase";
 import { useAuth } from "./auth-context";
 
+const legacyStatusKeys = new Set([
+  "pending_clarification", "pending_measurement", "measured", "pending_prepayment",
+  "pending_production", "assigned", "paused", "pending_delivery", "delivered",
+]);
+
+export interface AdminMutationResult {
+  success: boolean;
+  error?: string;
+}
+
+export interface AdminUserInput {
+  name: string;
+  login: string;
+  role: User["role"];
+  active: boolean;
+  password?: string;
+}
+
+export interface AdminStatusInput {
+  key: string;
+  label: string;
+  color: string;
+  isFinal: boolean;
+  order: number;
+}
+
+export interface AdminCategoryInput {
+  name: string;
+  type: "income" | "expense";
+  icon: string;
+  color: string;
+  active: boolean;
+  order: number;
+  includeInProfit: boolean;
+  canLinkOrder: boolean;
+  requireComment: boolean;
+  requireReceipt: boolean;
+}
+
+export interface AdminAccountInput {
+  name: string;
+  type: string;
+  icon: string;
+  active: boolean;
+  showInTotal: boolean;
+  order: number;
+}
+
 // ── Data shape ─────────────────────────────────────────
 export interface AppData {
   users: User[];
@@ -52,6 +100,10 @@ export interface AppData {
     comment?: string; receiptPhoto?: string; markDelivered?: boolean;
   }) => Promise<boolean>;
   recordOrderAudit: (orderId: string, details: string) => Promise<void>;
+  saveAdminUser: (id: string | null, input: AdminUserInput) => Promise<AdminMutationResult>;
+  saveAdminStatus: (id: string | null, input: AdminStatusInput) => Promise<AdminMutationResult>;
+  saveAdminCategory: (id: string | null, input: AdminCategoryInput) => Promise<AdminMutationResult>;
+  saveAdminAccount: (id: string | null, input: AdminAccountInput) => Promise<AdminMutationResult>;
   refresh: () => Promise<void>;
 }
 
@@ -68,6 +120,14 @@ const orderFieldLabels: Partial<Record<keyof Order, string>> = {
 
 function describeOrderUpdates(updates: Partial<Order>) {
   return Object.keys(updates).map(key => orderFieldLabels[key as keyof Order] || key).join(", ");
+}
+
+function getAdminErrorMessage(error: { message?: string; details?: string } | null) {
+  const message = `${error?.message || ""} ${error?.details || ""}`.toLowerCase();
+  if (message.includes("duplicate") || message.includes("unique")) return "Такой логин или системный ключ уже используется";
+  if (message.includes("admin_save_user") || message.includes("function") && message.includes("does not exist")) return "Функции управления пользователями ещё не установлены в Supabase";
+  if (message.includes("permission") || message.includes("недостаточно прав")) return "Недостаточно прав для этого изменения";
+  return error?.message || "Не удалось сохранить изменения";
 }
 
 // ── Period filter helper ───────────────────────────────
@@ -94,7 +154,11 @@ function useDemoData(): AppData {
   const [clients, setClients] = useState<Client[]>([...demoClients]);
   const [cars, setCars] = useState<Car[]>([...demoCars]);
   const [transactions, setTransactions] = useState<Transaction[]>([...demoTransactions]);
+  const [users, setUsers] = useState<User[]>([...demoUsers]);
+  const [statuses, setStatuses] = useState<OrderStatusConfig[]>(demoStatuses.filter(item => !legacyStatusKeys.has(item.key)));
   const [accounts, setAccounts] = useState<Account[]>([...demoAccounts]);
+  const [expenseCategories, setExpenseCategories] = useState<Category[]>([...demoExpenseCategories]);
+  const [incomeCategories, setIncomeCategories] = useState<Category[]>([...demoIncomeCategories]);
   const [notifications, setNotifications] = useState<Notification[]>([...demoNotifications]);
   const [auditLog, setAuditLog] = useState<AuditLogEntry[]>([...demoAuditLog]);
   const [templates, setTemplates] = useState<TemplatesByBrand>({ ...demoTemplates });
@@ -104,7 +168,7 @@ function useDemoData(): AppData {
       ...o,
       id: `order_${Date.now()}`,
       number: `${new Date().getDate().toString().padStart(2,"0")}${(new Date().getMonth()+1).toString().padStart(2,"0")}-${Math.floor(Math.random()*900)+100}`,
-      status: (o.assigneeId ? "assigned" : (o.prepayment || 0) > 0 ? "pending_production" : "new") as OrderStatus,
+      status: "new" as OrderStatus,
       priority: o.priority || "normal",
       createdById: o.createdById || user?.id,
       createdAt: new Date().toISOString(),
@@ -196,11 +260,7 @@ function useDemoData(): AppData {
     const order = orders.find(item => item.id === input.orderId);
     if (!order || input.amount <= 0 || input.amount > order.remaining) return false;
     const paid = order.paid + input.amount;
-    const status: OrderStatus = input.markDelivered && paid >= order.totalPrice
-      ? "completed"
-      : order.status === "new" || order.status === "pending_prepayment"
-        ? order.assigneeId ? "assigned" : "pending_production"
-        : order.status;
+    const status: OrderStatus = input.markDelivered && paid >= order.totalPrice ? "completed" : order.status;
     setOrders(prev => prev.map(item => item.id === order.id ? { ...item, paid, remaining: item.totalPrice - paid, status } : item));
     setAccounts(prev => prev.map(item => item.id === input.accountId ? { ...item, balance: item.balance + input.amount } : item));
     setTransactions(prev => [{
@@ -217,12 +277,51 @@ function useDemoData(): AppData {
     setAuditLog(prev => [{ id: `audit_${Date.now()}`, userId: user.id, userName: user.name, action: "order_updated", details, entityType: "order", entityId: orderId, timestamp: new Date().toISOString() }, ...prev]);
   }, [user]);
 
+  const saveAdminUser = useCallback(async (id: string | null, input: AdminUserInput): Promise<AdminMutationResult> => {
+    const nextUser: User = {
+      id: id || `user_${Date.now()}`,
+      name: input.name,
+      login: input.login,
+      role: input.role,
+      active: input.active,
+      createdAt: users.find(item => item.id === id)?.createdAt || new Date().toISOString(),
+      lastLogin: users.find(item => item.id === id)?.lastLogin,
+    };
+    setUsers(prev => id ? prev.map(item => item.id === id ? nextUser : item) : [...prev, nextUser]);
+    return { success: true };
+  }, [users]);
+
+  const saveAdminStatus = useCallback(async (id: string | null, input: AdminStatusInput): Promise<AdminMutationResult> => {
+    const nextStatus: OrderStatusConfig = { id: id || `status_${Date.now()}`, key: input.key as OrderStatus, label: input.label, color: input.color, isFinal: input.isFinal, order: input.order };
+    setStatuses(prev => (id ? prev.map(item => item.id === id ? nextStatus : item) : [...prev, nextStatus]).sort((a, b) => a.order - b.order));
+    return { success: true };
+  }, []);
+
+  const saveAdminCategory = useCallback(async (id: string | null, input: AdminCategoryInput): Promise<AdminMutationResult> => {
+    const nextCategory: Category = { id: id || `category_${Date.now()}`, ...input };
+    const setter = input.type === "expense" ? setExpenseCategories : setIncomeCategories;
+    setter(prev => (id ? prev.map(item => item.id === id ? nextCategory : item) : [...prev, nextCategory]).sort((a, b) => a.order - b.order));
+    return { success: true };
+  }, []);
+
+  const saveAdminAccount = useCallback(async (id: string | null, input: AdminAccountInput): Promise<AdminMutationResult> => {
+    const previous = accounts.find(item => item.id === id);
+    const nextAccount: Account = {
+      id: id || `account_${Date.now()}`,
+      ...input,
+      balance: previous?.balance || 0,
+      initialBalance: previous?.initialBalance || 0,
+    };
+    setAccounts(prev => (id ? prev.map(item => item.id === id ? nextAccount : item) : [...prev, nextAccount]).sort((a, b) => a.order - b.order));
+    return { success: true };
+  }, [accounts]);
+
   return {
-    users: demoUsers,
-    statuses: demoStatuses,
+    users,
+    statuses,
     accounts,
-    expenseCategories: demoExpenseCategories,
-    incomeCategories: demoIncomeCategories,
+    expenseCategories,
+    incomeCategories,
     clients,
     cars,
     orders,
@@ -239,6 +338,7 @@ function useDemoData(): AppData {
     markNotificationRead, markAllNotificationsRead,
     receiveOrderPayment,
     recordOrderAudit,
+    saveAdminUser, saveAdminStatus, saveAdminCategory, saveAdminAccount,
   };
 }
 
@@ -288,7 +388,7 @@ function useSupabaseData(): AppData {
         { data: auditLog },
         { data: notifications },
       ] = await Promise.all([
-        sb.from("profiles").select("*").eq("active", true),
+        user.role === "admin" ? sb.from("profiles").select("*").order("created_at") : sb.from("profiles").select("*").eq("active", true),
         sb.from("order_statuses").select("*").order("sort_order"),
         sb.from("accounts").select("*").order("sort_order"),
         sb.from("categories").select("*").order("sort_order"),
@@ -307,7 +407,7 @@ function useSupabaseData(): AppData {
           active: p.active, avatar: p.avatar_url, lastLogin: p.last_login,
           createdAt: p.created_at,
         })),
-        statuses: (statuses || []).map(s => ({
+        statuses: (statuses || []).filter(s => !legacyStatusKeys.has(s.key)).map(s => ({
           id: s.id, key: s.key, label: s.label, color: s.color,
           isFinal: s.is_final, order: s.sort_order,
         })),
@@ -421,7 +521,7 @@ function useSupabaseData(): AppData {
     if (!sb) return null;
 
     const num = `${new Date().getDate().toString().padStart(2,"0")}${(new Date().getMonth()+1).toString().padStart(2,"0")}-${Math.floor(Math.random()*900)+100}`;
-    const initialStatus: OrderStatus = o.assigneeId ? "assigned" : (o.prepayment || 0) > 0 ? "pending_production" : "new";
+    const initialStatus: OrderStatus = "new";
 
     const { data: created, error } = await sb.from("orders").insert({
       number: num,
@@ -493,10 +593,7 @@ function useSupabaseData(): AppData {
     if (!sb) return false;
 
     const previous = data.orders.find(o => o.id === id);
-    const automaticStatus = updates.assigneeId && previous && ["new", "pending_prepayment", "pending_production"].includes(previous.status)
-      ? "assigned" as OrderStatus
-      : undefined;
-    const effectiveUpdates = automaticStatus ? { ...updates, status: automaticStatus } : updates;
+    const effectiveUpdates = updates;
     const dbUpdates: Record<string, any> = {};
     if (effectiveUpdates.status !== undefined) dbUpdates.status = effectiveUpdates.status;
     if (updates.totalPrice !== undefined) dbUpdates.total_price = updates.totalPrice;
@@ -827,6 +924,62 @@ function useSupabaseData(): AppData {
     if (audit) setData(prev => ({ ...prev, auditLog: [{ id: audit.id, userId: audit.user_id, userName: audit.user_name, action: audit.action, details: audit.details, entityType: audit.entity_type, entityId: audit.entity_id, timestamp: audit.created_at }, ...prev.auditLog] }));
   }, [user]);
 
+  const saveAdminUser = useCallback(async (id: string | null, input: AdminUserInput): Promise<AdminMutationResult> => {
+    const sb = getSupabase();
+    if (!sb || !user || user.role !== "admin") return { success: false, error: "Доступно только администратору" };
+    const { error } = await sb.rpc("admin_save_user", {
+      p_user_id: id,
+      p_name: input.name.trim(),
+      p_login: input.login.trim().toLowerCase(),
+      p_role: input.role,
+      p_active: input.active,
+      p_password: input.password?.trim() || null,
+    });
+    if (error) return { success: false, error: getAdminErrorMessage(error) };
+    await fetchAll();
+    return { success: true };
+  }, [user, fetchAll]);
+
+  const saveAdminStatus = useCallback(async (id: string | null, input: AdminStatusInput): Promise<AdminMutationResult> => {
+    const sb = getSupabase();
+    if (!sb || !user || user.role !== "admin") return { success: false, error: "Доступно только администратору" };
+    const payload = { key: input.key.trim().toLowerCase(), label: input.label.trim(), color: input.color, is_final: input.isFinal, sort_order: input.order };
+    const query = id ? sb.from("order_statuses").update(payload).eq("id", id) : sb.from("order_statuses").insert(payload);
+    const { error } = await query;
+    if (error) return { success: false, error: getAdminErrorMessage(error) };
+    await sb.from("audit_log").insert({ user_id: user.id, user_name: user.name, action: id ? "status_updated" : "status_created", details: `${id ? "Изменён" : "Создан"} статус «${input.label}»`, entity_type: "order_status", entity_id: id });
+    await fetchAll();
+    return { success: true };
+  }, [user, fetchAll]);
+
+  const saveAdminCategory = useCallback(async (id: string | null, input: AdminCategoryInput): Promise<AdminMutationResult> => {
+    const sb = getSupabase();
+    if (!sb || !user || user.role !== "admin") return { success: false, error: "Доступно только администратору" };
+    const payload = {
+      name: input.name.trim(), type: input.type, icon: input.icon, color: input.color,
+      active: input.active, sort_order: input.order, include_in_profit: input.includeInProfit,
+      can_link_order: input.canLinkOrder, require_comment: input.requireComment, require_receipt: input.requireReceipt,
+    };
+    const query = id ? sb.from("categories").update(payload).eq("id", id) : sb.from("categories").insert(payload);
+    const { error } = await query;
+    if (error) return { success: false, error: getAdminErrorMessage(error) };
+    await sb.from("audit_log").insert({ user_id: user.id, user_name: user.name, action: id ? "category_updated" : "category_created", details: `${id ? "Изменена" : "Создана"} категория «${input.name}»`, entity_type: "category", entity_id: id });
+    await fetchAll();
+    return { success: true };
+  }, [user, fetchAll]);
+
+  const saveAdminAccount = useCallback(async (id: string | null, input: AdminAccountInput): Promise<AdminMutationResult> => {
+    const sb = getSupabase();
+    if (!sb || !user || user.role !== "admin") return { success: false, error: "Доступно только администратору" };
+    const payload = { name: input.name.trim(), type: input.type, icon: input.icon, active: input.active, show_in_total: input.showInTotal, sort_order: input.order };
+    const query = id ? sb.from("accounts").update(payload).eq("id", id) : sb.from("accounts").insert({ ...payload, balance: 0, initial_balance: 0 });
+    const { error } = await query;
+    if (error) return { success: false, error: getAdminErrorMessage(error) };
+    await sb.from("audit_log").insert({ user_id: user.id, user_name: user.name, action: id ? "account_updated" : "account_created", details: `${id ? "Изменён" : "Создан"} счёт «${input.name}»`, entity_type: "account", entity_id: id });
+    await fetchAll();
+    return { success: true };
+  }, [user, fetchAll]);
+
   return {
     ...data,
     loading,
@@ -837,6 +990,7 @@ function useSupabaseData(): AppData {
     markNotificationRead, markAllNotificationsRead,
     receiveOrderPayment,
     recordOrderAudit,
+    saveAdminUser, saveAdminStatus, saveAdminCategory, saveAdminAccount,
   };
 }
 
