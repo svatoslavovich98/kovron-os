@@ -5,20 +5,22 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { formatCurrency, formatDate, cn } from "@/lib/utils";
-import { demoClients, demoOrders, demoCars } from "@/lib/demo-data";
+import { useData } from "@/lib/data-context";
 import { Search, Phone, MessageCircle, ShoppingBag, Calendar, ChevronRight } from "lucide-react";
+import Link from "next/link";
 
 export default function ClientsPage() {
+  const { clients, orders, cars } = useData();
   const [search, setSearch] = useState("");
 
-  const clients = useMemo(() => {
-    let list = demoClients.map((c) => {
-      const orders = demoOrders.filter((o) => o.clientId === c.id);
-      const totalSum = orders.reduce((s, o) => s + o.totalPrice, 0);
-      const totalPaid = orders.reduce((s, o) => s + o.paid, 0);
-      const debt = orders.reduce((s, o) => s + o.remaining, 0);
-      const cars = orders.map((o) => demoCars.find((car) => car.id === o.carId)).filter(Boolean);
-      return { ...c, orders, totalSum, totalPaid, debt, cars, orderCount: orders.length };
+  const filteredClients = useMemo(() => {
+    let list = clients.map((c) => {
+      const clientOrders = orders.filter((o) => o.clientId === c.id);
+      const totalSum = clientOrders.reduce((s, o) => s + o.totalPrice, 0);
+      const totalPaid = clientOrders.reduce((s, o) => s + o.paid, 0);
+      const debt = clientOrders.reduce((s, o) => s + o.remaining, 0);
+      const clientCars = clientOrders.map((o) => cars.find((car) => car.id === o.carId)).filter(Boolean);
+      return { ...c, orders: clientOrders, totalSum, totalPaid, debt, cars: clientCars, orderCount: clientOrders.length };
     });
 
     if (search) {
@@ -29,7 +31,7 @@ export default function ClientsPage() {
     }
 
     return list;
-  }, [search]);
+  }, [search, clients, orders, cars]);
 
   return (
     <div className="p-4 lg:p-6 max-w-3xl mx-auto space-y-4">
@@ -40,11 +42,12 @@ export default function ClientsPage() {
         <Input placeholder="Поиск по имени или телефону" value={search} onChange={(e) => setSearch(e.target.value)} className="pl-10" />
       </div>
 
-      <p className="text-sm text-muted-foreground">{clients.length} клиентов</p>
+      <p className="text-sm text-muted-foreground">{filteredClients.length} клиентов</p>
 
       <div className="space-y-2">
-        {clients.map((client) => (
-          <Card key={client.id} className="hover:border-primary/30 transition-colors cursor-pointer">
+        {filteredClients.map((client) => (
+          <Link key={client.id} href={`/clients/${client.id}`} className="block">
+          <Card className="hover:border-primary/30 transition-colors cursor-pointer">
             <CardContent className="p-4">
               <div className="flex items-center justify-between mb-2">
                 <h3 className="font-semibold">{client.name}</h3>
@@ -99,6 +102,7 @@ export default function ClientsPage() {
               )}
             </CardContent>
           </Card>
+          </Link>
         ))}
       </div>
     </div>

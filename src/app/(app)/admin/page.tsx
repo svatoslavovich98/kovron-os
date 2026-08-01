@@ -9,11 +9,12 @@ import { Badge } from "@/components/ui/badge";
 import { Avatar } from "@/components/ui/avatar";
 import { formatDateTime, getRoleLabel, cn } from "@/lib/utils";
 import type { UserRole } from "@/lib/types";
-import { demoUsers, demoStatuses, demoExpenseCategories, demoIncomeCategories, demoAccounts, demoAuditLog, materialColors, edgeColors, kitLabels } from "@/lib/demo-data";
+import { useData } from "@/lib/data-context";
+import { kitLabels } from "@/lib/demo-data";
 import {
   Users, Shield, Tag, CreditCard, Palette, Package,
   Settings, Clock, ChevronRight, Plus, Edit2, Trash2,
-  ToggleLeft, Archive, AlertTriangle,
+  ToggleLeft, Archive, AlertTriangle, Download,
 } from "lucide-react";
 
 type AdminSection = "users" | "statuses" | "categories" | "accounts" | "catalogs" | "audit" | "settings";
@@ -31,6 +32,7 @@ const sections: { key: AdminSection; label: string; icon: typeof Users; descript
 export default function AdminPage() {
   const { user } = useAuth();
   const router = useRouter();
+  const appData = useData();
   const [activeSection, setActiveSection] = useState<AdminSection>("users");
 
   if (!user || user.role !== "admin") {
@@ -43,9 +45,23 @@ export default function AdminPage() {
     );
   }
 
+  const downloadBackup = () => {
+    const backup = {
+      exportedAt: new Date().toISOString(), version: 1,
+      users: appData.users, statuses: appData.statuses, accounts: appData.accounts,
+      expenseCategories: appData.expenseCategories, incomeCategories: appData.incomeCategories,
+      clients: appData.clients, cars: appData.cars, orders: appData.orders,
+      transactions: appData.transactions, seamstressPayments: appData.seamstressPayments,
+      auditLog: appData.auditLog,
+    };
+    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob); const anchor = document.createElement("a");
+    anchor.href = url; anchor.download = `kovron-backup-${new Date().toISOString().slice(0, 10)}.json`; anchor.click(); URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="p-4 lg:p-6 max-w-6xl mx-auto space-y-4">
-      <h1 className="text-xl font-bold">Админка</h1>
+      <div className="flex items-center justify-between gap-3"><h1 className="text-xl font-bold">Админка</h1><Button variant="outline" size="sm" onClick={downloadBackup}><Download className="h-4 w-4 mr-1" />Резервная копия</Button></div>
 
       <div className="flex lg:gap-6">
         {/* Section nav */}
@@ -102,6 +118,8 @@ export default function AdminPage() {
 }
 
 function AdminContent({ section }: { section: AdminSection }) {
+  const { users, statuses, expenseCategories, incomeCategories, accounts, auditLog } = useData();
+
   switch (section) {
     case "users":
       return (
@@ -110,7 +128,7 @@ function AdminContent({ section }: { section: AdminSection }) {
             <h2 className="text-lg font-semibold">Пользователи</h2>
             <Button size="sm"><Plus className="h-4 w-4 mr-1" /> Добавить</Button>
           </div>
-          {demoUsers.map((u) => (
+          {users.map((u) => (
             <Card key={u.id}>
               <CardContent className="p-4 flex items-center gap-4">
                 <Avatar name={u.name} />
@@ -142,7 +160,7 @@ function AdminContent({ section }: { section: AdminSection }) {
             <h2 className="text-lg font-semibold">Статусы заказов</h2>
             <Button size="sm"><Plus className="h-4 w-4 mr-1" /> Новый статус</Button>
           </div>
-          {demoStatuses.map((s) => (
+          {statuses.map((s) => (
             <div key={s.id} className="flex items-center gap-3 p-3 rounded-md bg-card border border-border">
               <div className="h-4 w-4 rounded-full shrink-0" style={{ backgroundColor: s.color }} />
               <span className="text-sm font-medium flex-1">{s.label}</span>
@@ -163,7 +181,7 @@ function AdminContent({ section }: { section: AdminSection }) {
               <Button size="sm"><Plus className="h-4 w-4 mr-1" /> Добавить</Button>
             </div>
             <div className="grid grid-cols-2 lg:grid-cols-3 gap-2">
-              {demoExpenseCategories.map((cat) => (
+              {expenseCategories.map((cat) => (
                 <div key={cat.id} className="flex items-center gap-2 p-3 rounded-md bg-card border border-border">
                   <div className="h-8 w-8 rounded-full flex items-center justify-center" style={{ backgroundColor: `${cat.color}20` }}>
                     <span style={{ color: cat.color }} className="text-sm">
@@ -186,7 +204,7 @@ function AdminContent({ section }: { section: AdminSection }) {
               <Button size="sm"><Plus className="h-4 w-4 mr-1" /> Добавить</Button>
             </div>
             <div className="grid grid-cols-2 gap-2">
-              {demoIncomeCategories.map((cat) => (
+              {incomeCategories.map((cat) => (
                 <div key={cat.id} className="flex items-center gap-2 p-3 rounded-md bg-card border border-border">
                   <div className="h-8 w-8 rounded-full bg-income/10 flex items-center justify-center">
                     <span className="text-income text-sm">💰</span>
@@ -207,7 +225,7 @@ function AdminContent({ section }: { section: AdminSection }) {
             <h2 className="text-lg font-semibold">Счета и кошельки</h2>
             <Button size="sm"><Plus className="h-4 w-4 mr-1" /> Новый счёт</Button>
           </div>
-          {demoAccounts.map((acc) => (
+          {accounts.map((acc) => (
             <Card key={acc.id}>
               <CardContent className="p-4 flex items-center gap-3">
                 <div className="flex-1">
@@ -239,22 +257,6 @@ function AdminContent({ section }: { section: AdminSection }) {
               </div>
             </CardContent>
           </Card>
-          <Card>
-            <CardContent className="p-4">
-              <h3 className="text-sm font-semibold mb-3">Цвета материалов</h3>
-              <div className="flex flex-wrap gap-2">
-                {materialColors.map((c) => (
-                  <div key={c.name} className="flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-border text-xs">
-                    <div className="h-3.5 w-3.5 rounded-full border border-border" style={{ backgroundColor: c.hex }} />
-                    {c.name}
-                  </div>
-                ))}
-                <button className="px-2.5 py-1 rounded-full border border-dashed border-border text-xs text-muted-foreground">
-                  + Добавить
-                </button>
-              </div>
-            </CardContent>
-          </Card>
         </div>
       );
 
@@ -262,7 +264,7 @@ function AdminContent({ section }: { section: AdminSection }) {
       return (
         <div className="space-y-3">
           <h2 className="text-lg font-semibold">Журнал действий</h2>
-          {demoAuditLog.map((entry) => (
+          {auditLog.map((entry) => (
             <div key={entry.id} className="flex items-start gap-3 p-3 rounded-md bg-card border border-border">
               <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
                 <span className="text-xs font-bold text-primary">{entry.userName[0]}</span>

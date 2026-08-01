@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 160" fill="none">
+  <!-- KOVRON text -->
+  <text x="200" y="75" text-anchor="middle" font-family="'Cormorant Garamond', 'Georgia', serif" font-size="72" font-weight="500" letter-spacing="8" fill="currentColor">KOVRON</text>
+  <!-- Car mat silhouette -->
+  <path d="M80 110 C80 110, 120 105, 160 108 C180 109, 200 115, 220 112 C240 109, 280 105, 320 110 L310 120 C310 120, 260 115, 220 118 C200 120, 190 125, 170 122 C150 119, 120 115, 90 120 Z" stroke="currentColor" stroke-width="1.5" fill="none"/>
+</svg>

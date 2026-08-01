@@ -6,10 +6,14 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { formatCurrency, formatDate, getGreeting, formatDateShort, cn } from "@/lib/utils";
-import { demoOrders, demoCars, demoStatuses, kitLabels, demoSeamstressPayments } from "@/lib/demo-data";
+import { useData } from "@/lib/data-context";
+import { kitLabels } from "@/lib/demo-data";
+import { CompleteWorkDialog } from "@/components/complete-work-dialog";
+import { OrderPhotoGallery } from "@/components/order-photo-gallery";
+import { isFinishedPhoto } from "@/lib/order-media";
 import {
   Play, Pause, RotateCcw, CheckCircle2, Calendar,
-  Image, Clock, Wallet, ChevronDown,
+  Clock, Wallet, ChevronDown, Loader2,
 } from "lucide-react";
 
 type TabKey = "in_progress" | "assigned" | "ready";
@@ -18,14 +22,24 @@ export default function SeamstressCabinet() {
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState<TabKey>("assigned");
   const [expandedOrder, setExpandedOrder] = useState<string | null>(null);
+  const [completingOrderId, setCompletingOrderId] = useState<string | null>(null);
+  const [workingId, setWorkingId] = useState<string | null>(null);
+
+  const { orders, cars, statuses, updateOrderStatus } = useData();
+
+  const moveOrder = async (orderId: string, status: "in_progress" | "paused") => {
+    setWorkingId(orderId);
+    await updateOrderStatus(orderId, status);
+    setWorkingId(null);
+  };
 
   if (!user) return null;
 
-  const myOrders = demoOrders
+  const myOrders = orders
     .filter((o) => o.assigneeId === user.id)
     .map((o) => ({
       ...o,
-      car: demoCars.find((c) => c.id === o.carId),
+      car: cars.find((c) => c.id === o.carId),
     }));
 
   const inProgress = myOrders.filter((o) => o.status === "in_progress").length;
@@ -130,7 +144,7 @@ export default function SeamstressCabinet() {
       ) : (
         <div className="space-y-3">
           {filteredOrders.map((order) => {
-            const statusConfig = demoStatuses.find((s) => s.key === order.status);
+            const statusConfig = statuses.find((s) => s.key === order.status);
             const isExpanded = expandedOrder === order.id;
 
             return (
@@ -167,32 +181,6 @@ export default function SeamstressCabinet() {
                       </div>
                     )}
 
-                    {/* Colors */}
-                    <div className="flex items-center gap-3 text-sm">
-                      {[
-                        { label: "Материал", value: order.materialColor },
-                        { label: "Окантовка", value: order.edgeColor },
-                        { label: "Строчка", value: order.stitchColor },
-                      ].map((c) => (
-                        <div key={c.label} className="flex items-center gap-1">
-                          <div
-                            className="h-4 w-4 rounded-full border border-border"
-                            style={{
-                              backgroundColor:
-                                c.value === "Чёрный" ? "#1a1a1a" :
-                                c.value === "Серый" ? "#6b6b6b" :
-                                c.value === "Бежевый" ? "#d4b896" :
-                                c.value === "Коричневый" ? "#6b4226" :
-                                c.value === "Синий" ? "#2a4494" :
-                                c.value === "Красный" ? "#b82020" :
-                                c.value === "Зелёный" ? "#2d6b3f" : "#f0f0f0",
-                            }}
-                          />
-                          <span className="text-xs text-muted-foreground">{c.value}</span>
-                        </div>
-                      ))}
-                    </div>
-
                     {/* Payment */}
                     <div className="flex items-center gap-2 mt-3 pt-3 border-t border-border">
                       <Wallet className="h-4 w-4 text-primary" />
@@ -213,12 +201,8 @@ export default function SeamstressCabinet() {
                         </div>
                       )}
 
-                      {order.layoutImage && (
-                        <Button variant="outline" className="w-full">
-                          <Image className="h-4 w-4 mr-2" />
-                          Открыть раскладку
-                        </Button>
-                      )}
+                      <OrderPhotoGallery title="Раскладка" photos={order.layoutImage ? [order.layoutImage] : []} />
+                      <OrderPhotoGallery title="Салон автомобиля" photos={order.photos.filter(url => !isFinishedPhoto(url))} />
 
                       <div className="p-3 rounded-md bg-card border border-border">
                         <p className="text-xs text-muted-foreground mb-1">Статус оплаты</p>
@@ -236,25 +220,25 @@ export default function SeamstressCabinet() {
                       {/* Action buttons */}
                       <div className="space-y-2">
                         {order.status === "assigned" && (
-                          <Button className="w-full h-14 text-base" onClick={() => alert("Работа начата! (демо)")}>
-                            <Play className="h-5 w-5 mr-2" />
-                            Начать работу
+                          <Button className="w-full h-14 text-base" disabled={workingId === order.id} onClick={() => void moveOrder(order.id, "in_progress")}>
+                            {workingId === order.id ? <Loader2 className="h-5 w-5 mr-2 animate-spin" /> : <Play className="h-5 w-5 mr-2" />}
+                            {workingId === order.id ? "Сохранение…" : "Начать работу"}
                           </Button>
                         )}
                         {order.status === "in_progress" && (
                           <>
-                            <Button variant="outline" className="w-full h-14 text-base" onClick={() => alert("Приостановлено (демо)")}>
+                            <Button variant="outline" className="w-full h-14 text-base" disabled={workingId === order.id} onClick={() => void moveOrder(order.id, "paused")}>
                               <Pause className="h-5 w-5 mr-2" />
                               Приостановить
                             </Button>
-                            <Button className="w-full h-14 text-base bg-income hover:bg-income/90 text-white" onClick={() => alert("Заказ завершён! (демо)")}>
+                            <Button className="w-full h-14 text-base bg-income hover:bg-income/90 text-white" onClick={() => setCompletingOrderId(order.id)}>
                               <CheckCircle2 className="h-5 w-5 mr-2" />
                               Готово
                             </Button>
                           </>
                         )}
                         {order.status === "paused" && (
-                          <Button className="w-full h-14 text-base" onClick={() => alert("Работа продолжена (демо)")}>
+                          <Button className="w-full h-14 text-base" disabled={workingId === order.id} onClick={() => void moveOrder(order.id, "in_progress")}>
                             <RotateCcw className="h-5 w-5 mr-2" />
                             Продолжить
                           </Button>
@@ -268,6 +252,10 @@ export default function SeamstressCabinet() {
           })}
         </div>
       )}
+      {completingOrderId && (() => {
+        const completionOrder = orders.find(item => item.id === completingOrderId);
+        return completionOrder ? <CompleteWorkDialog order={completionOrder} onClose={() => setCompletingOrderId(null)} /> : null;
+      })()}
     </div>
   );
 }

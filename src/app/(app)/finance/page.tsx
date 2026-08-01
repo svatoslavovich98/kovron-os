@@ -1,14 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useAuth } from "@/lib/auth-context";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { formatCurrency, formatDateTime, cn } from "@/lib/utils";
-import { demoAccounts, demoTransactions, demoExpenseCategories, demoIncomeCategories } from "@/lib/demo-data";
+import { useData } from "@/lib/data-context";
 import {
   TrendingUp, TrendingDown, ArrowLeftRight, Wallet,
-  Plus, Minus, X, Check, ChevronDown,
+  Plus, Minus, X, Check, ChevronDown, Download,
 } from "lucide-react";
 import {
   PieChart, Pie, Cell, ResponsiveContainer, Tooltip,
@@ -25,31 +26,85 @@ const periods = [
 type ModalType = "income" | "expense" | "transfer" | null;
 
 export default function FinancePage() {
+  const { user } = useAuth();
+  const { accounts, transactions, expenseCategories, incomeCategories, createTransaction } = useData();
   const [period, setPeriod] = useState<string>("month");
   const [modal, setModal] = useState<ModalType>(null);
+  const [amount, setAmount] = useState("");
+  const [categoryId, setCategoryId] = useState("");
+  const [accountId, setAccountId] = useState("");
+  const [toAccountId, setToAccountId] = useState("");
+  const [comment, setComment] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
 
-  const totalBalance = demoAccounts.reduce((s, a) => s + a.balance, 0);
-  const totalIncome = demoTransactions.filter((t) => t.type === "income").reduce((s, t) => s + t.amount, 0);
-  const totalExpense = demoTransactions.filter((t) => t.type === "expense").reduce((s, t) => s + t.amount, 0);
+  useEffect(() => {
+    if (!modal) return;
+    const active = accounts.filter(item => item.active);
+    setAccountId(active[0]?.id || ""); setToAccountId(active[1]?.id || active[0]?.id || "");
+    setCategoryId((modal === "income" ? incomeCategories : expenseCategories)[0]?.id || "");
+    setAmount(""); setComment(""); setFormError(null);
+  }, [modal, accounts, incomeCategories, expenseCategories]);
+
+  const saveTransaction = async () => {
+    const value = Number(amount);
+    if (!modal || !value || value <= 0 || !accountId || (modal === "transfer" && (!toAccountId || toAccountId === accountId))) {
+      setFormError("Проверьте сумму, счёт и выбранные параметры"); return;
+    }
+    setSaving(true); setFormError(null);
+    const created = await createTransaction({
+      type: modal, amount: value, categoryId: modal === "transfer" ? undefined : categoryId,
+      accountId, toAccountId: modal === "transfer" ? toAccountId : undefined,
+      description: comment || undefined, userId: user?.id, userName: user?.name,
+      createdAt: new Date().toISOString(),
+    });
+    setSaving(false);
+    if (created) setModal(null); else setFormError("Не удалось сохранить операцию. Повторите попытку.");
+  };
+
+  const periodStart = new Date();
+  periodStart.setHours(0, 0, 0, 0);
+  if (period === "week") periodStart.setDate(periodStart.getDate() - 6);
+  if (period === "month") periodStart.setMonth(periodStart.getMonth() - 1);
+  if (period === "year") periodStart.setFullYear(periodStart.getFullYear() - 1);
+  const periodTransactions = transactions.filter(item => new Date(item.createdAt) >= periodStart);
+  const totalBalance = accounts.reduce((s, a) => s + a.balance, 0);
+  const totalIncome = periodTransactions.filter((t) => t.type === "income").reduce((s, t) => s + t.amount, 0);
+  const totalExpense = periodTransactions.filter((t) => t.type === "expense").reduce((s, t) => s + t.amount, 0);
   const profit = totalIncome - totalExpense;
 
   // Expense by category for pie chart
-  const expenseByCategory = demoExpenseCategories.map((cat) => ({
+  const expenseByCategory = expenseCategories.map((cat) => ({
     name: cat.name,
-    value: demoTransactions
+    value: periodTransactions
       .filter((t) => t.type === "expense" && t.categoryId === cat.id)
       .reduce((s, t) => s + t.amount, 0),
     color: cat.color,
     icon: cat.icon,
   })).filter((c) => c.value > 0);
 
-  const sortedTransactions = [...demoTransactions].sort(
+  const sortedTransactions = [...periodTransactions].sort(
     (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
   );
 
+  const exportFinance = () => {
+    const cell = (value: unknown) => `"${String(value ?? "").replace(/"/g, '""')}"`;
+    const rows = [
+      ["Дата", "Тип", "Сумма", "Счёт", "Категория", "Комментарий", "Сотрудник"],
+      ...sortedTransactions.map(item => {
+        const category = item.type === "income" ? incomeCategories.find(cat => cat.id === item.categoryId) : expenseCategories.find(cat => cat.id === item.categoryId);
+        const account = accounts.find(acc => acc.id === item.accountId);
+        return [item.createdAt, item.type === "income" ? "Доход" : item.type === "expense" ? "Расход" : "Перевод", item.amount, account?.name, category?.name, item.description, item.userName];
+      }),
+    ];
+    const blob = new Blob(["\uFEFF" + rows.map(row => row.map(cell).join(";")).join("\r\n")], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob); const anchor = document.createElement("a");
+    anchor.href = url; anchor.download = `kovron-finance-${period}-${new Date().toISOString().slice(0, 10)}.csv`; anchor.click(); URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="p-4 lg:p-6 max-w-3xl mx-auto space-y-5">
-      <h1 className="text-xl font-bold">Финансы</h1>
+      <div className="flex items-center justify-between gap-3"><h1 className="text-xl font-bold">Финансы</h1><Button variant="outline" size="sm" onClick={exportFinance}><Download className="h-4 w-4 mr-1" />Экспорт</Button></div>
 
       {/* Balance */}
       <Card className="bg-gradient-to-br from-card to-secondary2">
@@ -178,9 +233,9 @@ export default function FinancePage() {
           <div className="space-y-1">
             {sortedTransactions.map((t) => {
               const cat = t.type === "income"
-                ? demoIncomeCategories.find((c) => c.id === t.categoryId)
-                : demoExpenseCategories.find((c) => c.id === t.categoryId);
-              const account = demoAccounts.find((a) => a.id === t.accountId);
+                ? incomeCategories.find((c) => c.id === t.categoryId)
+                : expenseCategories.find((c) => c.id === t.categoryId);
+              const account = accounts.find((a) => a.id === t.accountId);
 
               return (
                 <div key={t.id} className="flex items-center gap-3 py-3 border-b border-border last:border-0">
@@ -244,17 +299,18 @@ export default function FinancePage() {
             <div className="space-y-3">
               <div>
                 <label className="text-sm text-muted-foreground mb-1 block">Сумма</label>
-                <Input type="number" placeholder="0" autoFocus className="text-2xl font-bold h-16 text-center" />
+                <Input type="number" placeholder="0" autoFocus value={amount} onChange={event => setAmount(event.target.value)} className="text-2xl font-bold h-16 text-center" />
               </div>
 
               {modal !== "transfer" && (
                 <div>
                   <label className="text-sm text-muted-foreground mb-2 block">Категория</label>
                   <div className="grid grid-cols-4 gap-2">
-                    {(modal === "income" ? demoIncomeCategories : demoExpenseCategories).map((cat) => (
+                    {(modal === "income" ? incomeCategories : expenseCategories).map((cat) => (
                       <button
                         key={cat.id}
-                        className="flex flex-col items-center gap-1 p-3 rounded-md border border-border hover:border-primary/30 transition-colors"
+                        onClick={() => setCategoryId(cat.id)}
+                        className={cn("flex flex-col items-center gap-1 p-3 rounded-md border hover:border-primary/30 transition-colors", categoryId === cat.id ? "border-primary bg-primary/10" : "border-border")}
                       >
                         <div
                           className="h-10 w-10 rounded-full flex items-center justify-center"
@@ -272,7 +328,8 @@ export default function FinancePage() {
                              cat.icon === "Truck" ? "🚚" :
                              cat.icon === "Receipt" ? "🧾" :
                              cat.icon === "Phone" ? "📱" :
-                             cat.icon === "RotateCcw" ? "↩" : "📋"}
+                             cat.icon === "RotateCcw" ? "↩" :
+                             cat.icon === "Globe" ? "🌐" : "📋"}
                           </span>
                         </div>
                         <span className="text-[10px] text-center leading-tight">{cat.name}</span>
@@ -287,10 +344,11 @@ export default function FinancePage() {
                   {modal === "transfer" ? "Откуда" : "Счёт"}
                 </label>
                 <div className="flex gap-2">
-                  {demoAccounts.filter((a) => a.active).map((acc) => (
+                  {accounts.filter((a) => a.active).map((acc) => (
                     <button
                       key={acc.id}
-                      className="flex-1 p-3 rounded-md border border-border hover:border-primary/30 transition-colors text-center"
+                      onClick={() => setAccountId(acc.id)}
+                      className={cn("flex-1 p-3 rounded-md border hover:border-primary/30 transition-colors text-center", accountId === acc.id ? "border-primary bg-primary/10" : "border-border")}
                     >
                       <p className="text-sm font-medium">{acc.name}</p>
                       <p className="text-xs text-muted-foreground">{formatCurrency(acc.balance)}</p>
@@ -303,10 +361,11 @@ export default function FinancePage() {
                 <div>
                   <label className="text-sm text-muted-foreground mb-1 block">Куда</label>
                   <div className="flex gap-2">
-                    {demoAccounts.filter((a) => a.active).map((acc) => (
+                    {accounts.filter((a) => a.active).map((acc) => (
                       <button
                         key={acc.id}
-                        className="flex-1 p-3 rounded-md border border-border hover:border-primary/30 transition-colors text-center"
+                        onClick={() => setToAccountId(acc.id)}
+                        className={cn("flex-1 p-3 rounded-md border hover:border-primary/30 transition-colors text-center", toAccountId === acc.id ? "border-primary bg-primary/10" : "border-border")}
                       >
                         <p className="text-sm font-medium">{acc.name}</p>
                       </button>
@@ -317,12 +376,13 @@ export default function FinancePage() {
 
               <div>
                 <label className="text-sm text-muted-foreground mb-1 block">Комментарий</label>
-                <Input placeholder="Комментарий..." />
+                <Input placeholder="Комментарий..." value={comment} onChange={event => setComment(event.target.value)} />
               </div>
 
-              <Button className="w-full" size="lg" onClick={() => { alert("Сохранено! (демо)"); setModal(null); }}>
+              {formError && <p className="text-sm text-expense">{formError}</p>}
+              <Button className="w-full" size="lg" disabled={saving} onClick={() => void saveTransaction()}>
                 <Check className="h-5 w-5 mr-1" />
-                Сохранить
+                {saving ? "Сохранение…" : "Сохранить"}
               </Button>
             </div>
           </div>

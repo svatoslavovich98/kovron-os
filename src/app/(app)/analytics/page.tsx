@@ -1,61 +1,141 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { formatCurrency, cn } from "@/lib/utils";
-import { demoOrders, demoTransactions, demoClients, demoCars, demoAccounts, demoSeamstressPayments } from "@/lib/demo-data";
+import { useData } from "@/lib/data-context";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
   LineChart, Line, PieChart, Pie, Cell,
 } from "recharts";
-import { TrendingUp, ShoppingBag, Users, Car } from "lucide-react";
+import { Globe, UserCheck } from "lucide-react";
 
 const periods = ["Неделя", "Месяц", "Квартал", "Год"] as const;
 
+function getPeriodRange(period: string): { from: Date; to: Date } {
+  const now = new Date();
+  const to = new Date(now);
+  const from = new Date(now);
+  switch (period) {
+    case "Неделя": from.setDate(from.getDate() - 7); break;
+    case "Месяц": from.setMonth(from.getMonth() - 1); break;
+    case "Квартал": from.setMonth(from.getMonth() - 3); break;
+    case "Год": from.setFullYear(from.getFullYear() - 1); break;
+  }
+  return { from, to };
+}
+
 export default function AnalyticsPage() {
+  const { orders, transactions, clients, cars } = useData();
   const [period, setPeriod] = useState("Месяц");
 
-  const totalOrders = demoOrders.length;
-  const completedOrders = demoOrders.filter((o) => ["completed", "delivered"].includes(o.status)).length;
-  const cancelledOrders = demoOrders.filter((o) => o.status === "cancelled").length;
-  const totalRevenue = demoOrders.reduce((s, o) => s + o.totalPrice, 0);
-  const totalReceived = demoTransactions.filter((t) => t.type === "income").reduce((s, t) => s + t.amount, 0);
-  const totalExpenses = demoTransactions.filter((t) => t.type === "expense").reduce((s, t) => s + t.amount, 0);
+  const { from, to } = useMemo(() => getPeriodRange(period), [period]);
+
+  const filteredOrders = useMemo(() =>
+    orders.filter(o => new Date(o.createdAt) >= from && new Date(o.createdAt) <= to),
+    [orders, from, to]
+  );
+
+  const filteredTransactions = useMemo(() =>
+    transactions.filter(t => new Date(t.createdAt) >= from && new Date(t.createdAt) <= to),
+    [transactions, from, to]
+  );
+
+  const totalOrders = filteredOrders.length;
+  const totalRevenue = filteredOrders.reduce((s, o) => s + o.totalPrice, 0);
+  const totalReceived = filteredTransactions.filter((t) => t.type === "income").reduce((s, t) => s + t.amount, 0);
+  const totalExpenses = filteredTransactions.filter((t) => t.type === "expense").reduce((s, t) => s + t.amount, 0);
   const avgCheck = totalOrders > 0 ? Math.round(totalRevenue / totalOrders) : 0;
-  const clientDebt = demoOrders.reduce((s, o) => s + o.remaining, 0);
-  const seamstressAccrued = demoSeamstressPayments.filter((p) => p.status === "accrued").reduce((s, p) => s + p.amount, 0);
+  const clientDebt = filteredOrders.reduce((s, o) => s + o.remaining, 0);
 
-  const revenueByDay = [
-    { name: "Пн", income: 8000, expense: 3000 },
-    { name: "Вт", income: 12000, expense: 2500 },
-    { name: "Ср", income: 5000, expense: 7500 },
-    { name: "Чт", income: 15000, expense: 4000 },
-    { name: "Пт", income: 10000, expense: 5500 },
-    { name: "Сб", income: 18000, expense: 3000 },
-    { name: "Вс", income: 6000, expense: 1500 },
-  ];
+  // Payment stats for seamstress and Chinese suppliers
+  const totalSeamstress = filteredOrders.reduce((s, o) => s + o.seamstressPayment, 0);
+  const totalChinese = filteredOrders.reduce((s, o) => s + (o.chineseCost || 0), 0);
+  const totalMaterial = filteredOrders.reduce((s, o) => s + o.materialCost, 0);
+  const totalPlannedProfit = filteredOrders.reduce((s, o) => s + o.plannedProfit, 0);
 
-  const profitByMonth = [
-    { name: "Янв", profit: 45000 },
-    { name: "Фев", profit: 52000 },
-    { name: "Мар", profit: 38000 },
-    { name: "Апр", profit: 61000 },
-    { name: "Май", profit: 55000 },
-    { name: "Июн", profit: 72000 },
-    { name: "Июл", profit: 68000 },
-  ];
+  // Доходы/расходы по последним 7 дням — из реальных транзакций
+  const revenueByDay = useMemo(() => {
+    const days = ["Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"];
+    const out: { name: string; income: number; expense: number }[] = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setHours(0, 0, 0, 0);
+      d.setDate(d.getDate() - i);
+      const next = new Date(d);
+      next.setDate(next.getDate() + 1);
+      const dayTx = transactions.filter((t) => {
+        const td = new Date(t.createdAt);
+        return td >= d && td < next;
+      });
+      out.push({
+        name: days[d.getDay()],
+        income: dayTx.filter((t) => t.type === "income").reduce((s, t) => s + t.amount, 0),
+        expense: dayTx.filter((t) => t.type === "expense").reduce((s, t) => s + t.amount, 0),
+      });
+    }
+    return out;
+  }, [transactions]);
 
-  // Brand popularity
+  // Прибыль по последним 7 месяцам — из реальных транзакций
+  const profitByMonth = useMemo(() => {
+    const months = ["Янв", "Фев", "Мар", "Апр", "Май", "Июн", "Июл", "Авг", "Сен", "Окт", "Ноя", "Дек"];
+    const out: { name: string; profit: number }[] = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(1);
+      d.setHours(0, 0, 0, 0);
+      d.setMonth(d.getMonth() - i);
+      const next = new Date(d);
+      next.setMonth(next.getMonth() + 1);
+      const monthTx = transactions.filter((t) => {
+        const td = new Date(t.createdAt);
+        return td >= d && td < next;
+      });
+      const inc = monthTx.filter((t) => t.type === "income").reduce((s, t) => s + t.amount, 0);
+      const exp = monthTx.filter((t) => t.type === "expense").reduce((s, t) => s + t.amount, 0);
+      out.push({ name: months[d.getMonth()], profit: inc - exp });
+    }
+    return out;
+  }, [transactions]);
+
+  // Расходы Оксане / китайцам по месяцам — для сравнительного графика
+  const payoutsByMonth = useMemo(() => {
+    const months = ["Янв", "Фев", "Мар", "Апр", "Май", "Июн", "Июл", "Авг", "Сен", "Окт", "Ноя", "Дек"];
+    const out: { name: string; oksana: number; china: number }[] = [];
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(1);
+      d.setHours(0, 0, 0, 0);
+      d.setMonth(d.getMonth() - i);
+      const next = new Date(d);
+      next.setMonth(next.getMonth() + 1);
+      const mOrders = orders.filter((o) => {
+        const od = new Date(o.createdAt);
+        return od >= d && od < next;
+      });
+      out.push({
+        name: months[d.getMonth()],
+        oksana: mOrders.reduce((s, o) => s + (o.seamstressPayment || 0), 0),
+        china: mOrders.reduce((s, o) => s + (o.chineseCost || 0), 0),
+      });
+    }
+    return out;
+  }, [orders]);
+
+  // Brand popularity (за выбранный период)
   const brandCounts: Record<string, number> = {};
-  demoOrders.forEach((o) => {
-    const car = demoCars.find((c) => c.id === o.carId);
+  filteredOrders.forEach((o) => {
+    const car = cars.find((c) => c.id === o.carId);
     if (car) brandCounts[car.brand] = (brandCounts[car.brand] || 0) + 1;
   });
-  const brandData = Object.entries(brandCounts).map(([name, value]) => ({ name, value }));
+  const brandData = Object.entries(brandCounts)
+    .map(([name, value]) => ({ name, value }))
+    .sort((a, b) => b.value - a.value);
 
   // Source stats
   const sourceCounts: Record<string, number> = {};
-  demoClients.forEach((c) => {
+  clients.forEach((c) => {
     if (c.source) sourceCounts[c.source] = (sourceCounts[c.source] || 0) + 1;
   });
   const sourceData = Object.entries(sourceCounts).map(([name, value]) => ({ name, value }));
@@ -84,14 +164,14 @@ export default function AnalyticsPage() {
       {/* KPI Grid */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {[
-          { label: "Заказов", value: totalOrders, icon: ShoppingBag },
-          { label: "Выручка", value: formatCurrency(totalRevenue), icon: TrendingUp },
+          { label: "Заказов", value: totalOrders },
+          { label: "Выручка", value: formatCurrency(totalRevenue) },
           { label: "Получено", value: formatCurrency(totalReceived) },
           { label: "Расходы", value: formatCurrency(totalExpenses) },
-          { label: "Прибыль", value: formatCurrency(totalReceived - totalExpenses) },
           { label: "Средний чек", value: formatCurrency(avgCheck) },
           { label: "Долг клиентов", value: formatCurrency(clientDebt) },
-          { label: "Начислено швее", value: formatCurrency(seamstressAccrued) },
+          { label: "Плановая прибыль", value: formatCurrency(totalPlannedProfit) },
+          { label: "Факт. прибыль", value: formatCurrency(totalReceived - totalExpenses) },
         ].map((item, i) => (
           <Card key={i}>
             <CardContent className="p-4">
@@ -101,6 +181,47 @@ export default function AnalyticsPage() {
           </Card>
         ))}
       </div>
+
+      {/* Расходы по контрагентам */}
+      <Card>
+        <CardContent className="p-4">
+          <h3 className="text-sm font-semibold mb-4">Расходы по контрагентам за период</h3>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="p-4 rounded-lg bg-[#ADD256]/10 border border-[#ADD256]/20">
+              <div className="flex items-center gap-2 mb-2">
+                <UserCheck className="h-4 w-4 text-[#ADD256]" />
+                <span className="text-xs text-muted-foreground">Оксане (пошив)</span>
+              </div>
+              <p className="text-2xl font-bold text-[#ADD256]">{formatCurrency(totalSeamstress)}</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                {filteredOrders.filter(o => o.seamstressPayment > 0).length} заказов
+              </p>
+            </div>
+            <div className="p-4 rounded-lg bg-[#F59E0B]/10 border border-[#F59E0B]/20">
+              <div className="flex items-center gap-2 mb-2">
+                <Globe className="h-4 w-4 text-[#F59E0B]" />
+                <span className="text-xs text-muted-foreground">Китайцам</span>
+              </div>
+              <p className="text-2xl font-bold text-[#F59E0B]">{formatCurrency(totalChinese)}</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                {filteredOrders.filter(o => (o.chineseCost || 0) > 0).length} заказов
+              </p>
+            </div>
+            <div className="p-4 rounded-lg bg-[#68A7FF]/10 border border-[#68A7FF]/20">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-xs text-muted-foreground">Материалы</span>
+              </div>
+              <p className="text-2xl font-bold text-[#68A7FF]">{formatCurrency(totalMaterial)}</p>
+            </div>
+            <div className="p-4 rounded-lg bg-primary/5 border border-primary/20">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-xs text-muted-foreground">Итого себестоимость</span>
+              </div>
+              <p className="text-2xl font-bold">{formatCurrency(totalSeamstress + totalChinese + totalMaterial)}</p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Charts */}
       <div className="grid lg:grid-cols-2 gap-5">
@@ -135,6 +256,32 @@ export default function AnalyticsPage() {
                   <Line type="monotone" dataKey="profit" stroke="hsl(var(--primary))" strokeWidth={2.5} dot={{ fill: "hsl(var(--primary))", r: 4 }} name="Прибыль" />
                 </LineChart>
               </ResponsiveContainer>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="p-4">
+            <h3 className="text-sm font-semibold mb-3">Выплаты: Оксана и китайцы по месяцам</h3>
+            <div className="h-52">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={payoutsByMonth}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                  <XAxis dataKey="name" tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} axisLine={false} />
+                  <YAxis tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} axisLine={false} tickFormatter={(v) => `${v / 1000}k`} />
+                  <Tooltip contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 12, fontSize: 13 }} formatter={(v: number) => formatCurrency(v)} />
+                  <Bar dataKey="oksana" fill="#ADD256" radius={[6, 6, 0, 0]} name="Оксане" />
+                  <Bar dataKey="china"  fill="#F59E0B" radius={[6, 6, 0, 0]} name="Китайцам" />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+            <div className="flex gap-4 justify-center mt-2">
+              <div className="flex items-center gap-1.5 text-xs">
+                <div className="h-2.5 w-2.5 rounded-full bg-[#ADD256]" /> Оксане
+              </div>
+              <div className="flex items-center gap-1.5 text-xs">
+                <div className="h-2.5 w-2.5 rounded-full bg-[#F59E0B]" /> Китайцам
+              </div>
             </div>
           </CardContent>
         </Card>

@@ -1,7 +1,7 @@
 import type {
   User, Client, Car, Order, Transaction, Category,
   Account, OrderStatusConfig, AuditLogEntry, Notification,
-  SeamstressPayment,
+  SeamstressPayment, TemplateItem, TemplatesByBrand,
 } from "./types";
 
 // ── Users ──────────────────────────────────────────────
@@ -49,6 +49,7 @@ export const demoAccounts: Account[] = [
 export const demoExpenseCategories: Category[] = [
   { id: "ec1", name: "Материалы", type: "expense", icon: "Scissors", color: "#68A7FF", active: true, order: 1, includeInProfit: true, canLinkOrder: true, requireComment: false, requireReceipt: false },
   { id: "ec2", name: "Оплата Оксане", type: "expense", icon: "UserCheck", color: "#ADD256", active: true, order: 2, includeInProfit: true, canLinkOrder: true, requireComment: false, requireReceipt: false },
+  { id: "ec13", name: "Оплата китайцам", type: "expense", icon: "Globe", color: "#F59E0B", active: true, order: 3, includeInProfit: true, canLinkOrder: true, requireComment: false, requireReceipt: false },
   { id: "ec3", name: "Реклама", type: "expense", icon: "Megaphone", color: "#F4B860", active: true, order: 3, includeInProfit: true, canLinkOrder: false, requireComment: false, requireReceipt: false },
   { id: "ec4", name: "Аренда", type: "expense", icon: "Home", color: "#FF6B6B", active: true, order: 4, includeInProfit: true, canLinkOrder: false, requireComment: false, requireReceipt: false },
   { id: "ec5", name: "Оборудование", type: "expense", icon: "Wrench", color: "#9CA39A", active: true, order: 5, includeInProfit: true, canLinkOrder: false, requireComment: false, requireReceipt: true },
@@ -95,7 +96,8 @@ export const demoOrders: Order[] = [
     createdAt: "2026-07-26T10:00:00", desiredDate: "2026-08-05",
     totalPrice: 12000, prepayment: 5000, paid: 5000, remaining: 7000,
     seamstressPayment: 1200, seamstressPaymentStatus: "planned",
-    materialCost: 2500, otherCosts: 0, plannedProfit: 3300,
+    chineseCost: 3000,
+    materialCost: 2500, otherCosts: 0, plannedProfit: 300,
     statusHistory: [
       { id: "sh1", userId: "u3", userName: "Ксюша", oldStatus: "new", newStatus: "pending_prepayment", timestamp: "2026-07-26T10:05:00" },
       { id: "sh2", userId: "u3", userName: "Ксюша", oldStatus: "pending_prepayment", newStatus: "assigned", timestamp: "2026-07-26T14:00:00" },
@@ -110,7 +112,8 @@ export const demoOrders: Order[] = [
     createdAt: "2026-07-22T09:00:00", desiredDate: "2026-07-30",
     totalPrice: 18000, prepayment: 10000, paid: 10000, remaining: 8000,
     seamstressPayment: 2000, seamstressPaymentStatus: "accrued",
-    materialCost: 3500, otherCosts: 500, plannedProfit: 2000,
+    chineseCost: 4000,
+    materialCost: 3500, otherCosts: 500, plannedProfit: -2000,
     statusHistory: [],
   },
   {
@@ -121,7 +124,8 @@ export const demoOrders: Order[] = [
     createdAt: "2026-07-29T11:00:00", desiredDate: "2026-08-10",
     totalPrice: 10000, prepayment: 0, paid: 0, remaining: 10000,
     seamstressPayment: 1000, seamstressPaymentStatus: "planned",
-    materialCost: 2000, otherCosts: 0, plannedProfit: 7000,
+    chineseCost: 2000,
+    materialCost: 2000, otherCosts: 0, plannedProfit: 5000,
     statusHistory: [],
   },
   {
@@ -132,7 +136,8 @@ export const demoOrders: Order[] = [
     createdAt: "2026-07-15T14:00:00", desiredDate: "2026-07-28",
     totalPrice: 11000, prepayment: 5500, paid: 11000, remaining: 0,
     seamstressPayment: 1100, seamstressPaymentStatus: "accrued",
-    materialCost: 2200, otherCosts: 0, plannedProfit: 6700,
+    chineseCost: 2500,
+    materialCost: 2200, otherCosts: 0, plannedProfit: 4200,
     statusHistory: [],
   },
   {
@@ -143,7 +148,8 @@ export const demoOrders: Order[] = [
     createdAt: "2026-07-31T08:00:00", desiredDate: "2026-08-15",
     totalPrice: 22000, prepayment: 0, paid: 0, remaining: 22000,
     seamstressPayment: 2500, seamstressPaymentStatus: "planned",
-    materialCost: 4000, otherCosts: 0, plannedProfit: 15500,
+    chineseCost: 5000,
+    materialCost: 4000, otherCosts: 0, plannedProfit: 10500,
     statusHistory: [],
   },
 ];
@@ -189,7 +195,7 @@ export const kitLabels: Record<string, string> = {
   front: "Передние коврики",
   bottom: "Нижние коврики",
   trunk: "Багажник",
-  bottom_only: "Только низ",
+  bottom_only: "Верхние коврики",
   custom: "Индивидуальный",
 };
 
@@ -212,3 +218,86 @@ export const materialColors = [
 
 export const edgeColors = [...materialColors];
 export const stitchColors = [...materialColors];
+
+// ── Templates (lekala) ────────────────────────────────
+const demoTemplatesList: TemplateItem[] = [
+  // Toyota
+  { brand: "Toyota", name: "Camry 70 (XV70) 2017+", type: "pol", hasImage: true },
+  { brand: "Toyota", name: "Camry 70 рестайлинг 2021+", type: "pol", hasImage: true },
+  { brand: "Toyota", name: "Camry 70 багажник", type: "bag", hasImage: true },
+  { brand: "Toyota", name: "RAV4 (XA50) 2019+", type: "pol", hasImage: true },
+  { brand: "Toyota", name: "RAV4 (XA50) багажник", type: "bag" },
+  { brand: "Toyota", name: "Land Cruiser 300 2021+", type: "pol", hasImage: true },
+  { brand: "Toyota", name: "Land Cruiser 300 багажник", type: "bag", hasImage: true },
+  { brand: "Toyota", name: "Land Cruiser Prado 150 2017+", type: "pol", hasImage: true },
+  { brand: "Toyota", name: "Corolla (E210) 2019+", type: "pol" },
+  // Lexus
+  { brand: "Lexus", name: "GX 460 2013+", type: "pol", hasImage: true },
+  { brand: "Lexus", name: "GX 460 багажник", type: "bag", hasImage: true },
+  { brand: "Lexus", name: "RX 350/450h (AL20) 2015+", type: "pol", hasImage: true },
+  { brand: "Lexus", name: "LX 570 2015+", type: "pol", hasImage: true },
+  { brand: "Lexus", name: "NX 200/300 2017+", type: "pol" },
+  // Kia
+  { brand: "Kia", name: "K5 (DL3) 2020+", type: "pol", hasImage: true },
+  { brand: "Kia", name: "Sportage (NQ5) 2022+", type: "pol", hasImage: true },
+  { brand: "Kia", name: "Sportage (NQ5) багажник", type: "bag" },
+  { brand: "Kia", name: "Sorento (MQ4) 2020+", type: "pol" },
+  { brand: "Kia", name: "Ceed (CD) 2018+", type: "pol" },
+  // Hyundai
+  { brand: "Hyundai", name: "Tucson (NX4) 2021+", type: "pol", hasImage: true },
+  { brand: "Hyundai", name: "Tucson (NX4) багажник", type: "bag" },
+  { brand: "Hyundai", name: "Santa Fe (TM) 2018+", type: "pol", hasImage: true },
+  { brand: "Hyundai", name: "Sonata (DN8) 2019+", type: "pol" },
+  { brand: "Hyundai", name: "Creta (SU2) 2021+", type: "pol", hasImage: true },
+  // BMW
+  { brand: "BMW", name: "X5 (G05) 2018+", type: "pol", hasImage: true },
+  { brand: "BMW", name: "X5 (G05) багажник", type: "bag", hasImage: true },
+  { brand: "BMW", name: "X3 (G01) 2017+", type: "pol" },
+  { brand: "BMW", name: "3 серия (G20) 2018+", type: "pol" },
+  { brand: "BMW", name: "5 серия (G30) 2017+", type: "pol", hasImage: true },
+  // Mercedes
+  { brand: "Mercedes-Benz", name: "GLE (W167) 2019+", type: "pol", hasImage: true },
+  { brand: "Mercedes-Benz", name: "GLC (X254) 2022+", type: "pol" },
+  { brand: "Mercedes-Benz", name: "E-Class (W213) 2016+", type: "pol", hasImage: true },
+  { brand: "Mercedes-Benz", name: "S-Class (W223) 2020+", type: "pol" },
+  // Volkswagen
+  { brand: "Volkswagen", name: "Tiguan (AD1) 2016+", type: "pol", hasImage: true },
+  { brand: "Volkswagen", name: "Tiguan багажник", type: "bag" },
+  { brand: "Volkswagen", name: "Polo (AW) 2020+", type: "pol" },
+  // Mazda
+  { brand: "Mazda", name: "CX-5 (KF) 2017+", type: "pol", hasImage: true },
+  { brand: "Mazda", name: "CX-5 (KF) багажник", type: "bag" },
+  { brand: "Mazda", name: "6 (GJ) 2018+", type: "pol" },
+  // Skoda
+  { brand: "Skoda", name: "Octavia (A8) 2020+", type: "pol", hasImage: true },
+  { brand: "Skoda", name: "Kodiaq 2016+", type: "pol" },
+  { brand: "Skoda", name: "Kodiaq багажник", type: "bag" },
+  // Nissan
+  { brand: "Nissan", name: "X-Trail (T32) 2014+", type: "pol", hasImage: true },
+  { brand: "Nissan", name: "Qashqai (J12) 2021+", type: "pol" },
+  // Mitsubishi
+  { brand: "Mitsubishi", name: "Outlander (GN) 2021+", type: "pol", hasImage: true },
+  { brand: "Mitsubishi", name: "Pajero Sport (KS) 2015+", type: "pol" },
+  // Audi
+  { brand: "Audi", name: "Q7 (4M) 2015+", type: "pol", hasImage: true },
+  { brand: "Audi", name: "Q5 (FY) 2017+", type: "pol" },
+  { brand: "Audi", name: "A6 (C8) 2018+", type: "pol" },
+  // Chery
+  { brand: "Chery", name: "Tiggo 7 Pro 2020+", type: "pol", hasImage: true },
+  { brand: "Chery", name: "Tiggo 8 Pro 2021+", type: "pol" },
+  // Haval
+  { brand: "Haval", name: "F7/F7x 2019+", type: "pol", hasImage: true },
+  { brand: "Haval", name: "Jolion 2021+", type: "pol" },
+  { brand: "Haval", name: "Dargo 2022+", type: "pol" },
+  // Geely
+  { brand: "Geely", name: "Coolray 2020+", type: "pol" },
+  { brand: "Geely", name: "Atlas Pro 2021+", type: "pol" },
+  { brand: "Geely", name: "Monjaro 2023+", type: "pol", hasImage: true },
+];
+
+// Group templates by brand
+export const demoTemplates: TemplatesByBrand = demoTemplatesList.reduce((acc, tpl) => {
+  if (!acc[tpl.brand]) acc[tpl.brand] = [];
+  acc[tpl.brand].push(tpl);
+  return acc;
+}, {} as TemplatesByBrand);

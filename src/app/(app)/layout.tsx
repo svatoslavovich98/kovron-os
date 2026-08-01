@@ -60,9 +60,18 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       {/* Desktop Sidebar */}
       <aside className="hidden lg:flex flex-col w-64 border-r border-border bg-card shrink-0">
         <div className="p-5 border-b border-border">
-          <h1 className="text-xl font-bold tracking-tight">
-            KOVRON <span className="text-primary">OS</span>
-          </h1>
+          <div className="flex items-center gap-3">
+            <div className="h-9 w-9 rounded-lg bg-gradient-to-br from-primary/20 to-primary/5 border border-primary/20 flex items-center justify-center">
+              <svg width="18" height="18" viewBox="-80 -110 160 240" fill="none">
+                <rect x="-80" y="-110" width="28" height="220" rx="6" fill="hsl(var(--primary))"/>
+                <path d="M-40,-20 L60,-110 L80,-90 L-20,0Z" fill="hsl(var(--primary))"/>
+                <path d="M-40,20 L80,110 L60,130 L-52,40Z" fill="hsl(var(--primary))" opacity="0.8"/>
+              </svg>
+            </div>
+            <h1 className="text-xl font-bold tracking-tight">
+              KOVRON <span className="text-primary">OS</span>
+            </h1>
+          </div>
         </div>
 
         <nav className="flex-1 py-3 overflow-y-auto">
@@ -125,7 +134,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       </main>
 
       {/* Mobile bottom nav */}
-      <nav className="lg:hidden fixed bottom-0 left-0 right-0 border-t border-border bg-card/95 backdrop-blur-lg z-50">
+      <nav className="lg:hidden fixed bottom-0 left-0 right-0 border-t border-border glass z-50">
         <div className="flex items-center justify-around h-16 px-2 safe-bottom">
           {bottomNav.map((item) => {
             if (item.isAction) {
@@ -228,7 +237,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             onClick={(e) => e.stopPropagation()}
           >
             {[
-              { href: "/production", label: "Производство", icon: Factory },
               { href: "/accounts", label: "Счета", icon: CreditCard },
               { href: "/analytics", label: "Аналитика", icon: BarChart3 },
               { href: "/clients", label: "Клиенты", icon: Users },

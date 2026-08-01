@@ -125,7 +125,7 @@ CREATE TABLE orders (
   number TEXT UNIQUE NOT NULL,
   client_id UUID NOT NULL REFERENCES clients(id),
   car_id UUID NOT NULL REFERENCES cars(id),
-  status_key TEXT NOT NULL REFERENCES order_statuses(key),
+  status TEXT NOT NULL DEFAULT 'new',
   kit_types TEXT[] NOT NULL DEFAULT '{}',
   material_color TEXT,
   bottom_color TEXT,
@@ -148,9 +148,10 @@ CREATE TABLE orders (
   remaining DECIMAL(12,2) GENERATED ALWAYS AS (total_price - paid) STORED,
   seamstress_payment DECIMAL(12,2) NOT NULL DEFAULT 0,
   seamstress_payment_status seamstress_payment_status NOT NULL DEFAULT 'planned',
+  chinese_cost DECIMAL(12,2) NOT NULL DEFAULT 0,
   material_cost DECIMAL(12,2) NOT NULL DEFAULT 0,
   other_costs DECIMAL(12,2) NOT NULL DEFAULT 0,
-  planned_profit DECIMAL(12,2) GENERATED ALWAYS AS (total_price - seamstress_payment - material_cost - other_costs) STORED,
+  planned_profit DECIMAL(12,2) GENERATED ALWAYS AS (total_price - seamstress_payment - chinese_cost - material_cost - other_costs) STORED,
   created_by UUID REFERENCES profiles(id),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -164,6 +165,7 @@ CREATE TABLE order_status_history (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   order_id UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
   user_id UUID NOT NULL REFERENCES profiles(id),
+  user_name TEXT,
   old_status TEXT,
   new_status TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -186,6 +188,7 @@ CREATE TABLE transactions (
   description TEXT,
   receipt_photo TEXT,
   user_id UUID NOT NULL REFERENCES profiles(id),
+  user_name TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -212,6 +215,7 @@ CREATE TABLE seamstress_payments (
 CREATE TABLE audit_log (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES profiles(id),
+  user_name TEXT,
   action TEXT NOT NULL,
   details TEXT,
   entity_type TEXT,
@@ -271,72 +275,135 @@ CREATE TABLE deleted_records (
 );
 
 -- ═══════════════════════════════════════════
+-- GRANTS (обязательно! RLS-политик недостаточно —
+-- без GRANT роль authenticated получает "permission denied")
+-- ═══════════════════════════════════════════
+
+GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES    IN SCHEMA public TO authenticated;
+GRANT USAGE, SELECT                  ON ALL SEQUENCES IN SCHEMA public TO authenticated;
+GRANT EXECUTE                        ON ALL FUNCTIONS IN SCHEMA public TO authenticated;
+
+GRANT ALL ON ALL TABLES    IN SCHEMA public TO service_role;
+GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO service_role;
+GRANT ALL ON ALL FUNCTIONS IN SCHEMA public TO service_role;
+
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO authenticated;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+  GRANT USAGE, SELECT ON SEQUENCES TO authenticated;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+  GRANT EXECUTE ON FUNCTIONS TO authenticated;
+
+-- ═══════════════════════════════════════════
+-- ROLE HELPERS (SECURITY DEFINER — обходят RLS,
+-- иначе политика на profiles рекурсивно вызывает саму себя)
+-- ═══════════════════════════════════════════
+
+CREATE OR REPLACE FUNCTION public.is_admin()
+RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path = public, pg_temp AS $$
+  SELECT COALESCE((SELECT role = 'admin' FROM public.profiles
+                   WHERE id = auth.uid() AND active LIMIT 1), false);
+$$;
+
+CREATE OR REPLACE FUNCTION public.is_staff()
+RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path = public, pg_temp AS $$
+  SELECT COALESCE((SELECT role IN ('admin','editor') FROM public.profiles
+                   WHERE id = auth.uid() AND active LIMIT 1), false);
+$$;
+
+CREATE OR REPLACE FUNCTION public.is_authed()
+RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path = public, pg_temp AS $$
+  SELECT EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND active);
+$$;
+
+GRANT EXECUTE ON FUNCTION public.is_admin()  TO authenticated;
+GRANT EXECUTE ON FUNCTION public.is_staff()  TO authenticated;
+GRANT EXECUTE ON FUNCTION public.is_authed() TO authenticated;
+
+-- ═══════════════════════════════════════════
 -- ROW LEVEL SECURITY
 -- ═══════════════════════════════════════════
 
-ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
-ALTER TABLE orders ENABLE ROW LEVEL SECURITY;
-ALTER TABLE transactions ENABLE ROW LEVEL SECURITY;
-ALTER TABLE clients ENABLE ROW LEVEL SECURITY;
-ALTER TABLE cars ENABLE ROW LEVEL SECURITY;
-ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
-ALTER TABLE seamstress_payments ENABLE ROW LEVEL SECURITY;
-ALTER TABLE audit_log ENABLE ROW LEVEL SECURITY;
-ALTER TABLE templates ENABLE ROW LEVEL SECURITY;
+ALTER TABLE profiles             ENABLE ROW LEVEL SECURITY;
+ALTER TABLE orders               ENABLE ROW LEVEL SECURITY;
+ALTER TABLE transactions         ENABLE ROW LEVEL SECURITY;
+ALTER TABLE clients              ENABLE ROW LEVEL SECURITY;
+ALTER TABLE cars                 ENABLE ROW LEVEL SECURITY;
+ALTER TABLE notifications        ENABLE ROW LEVEL SECURITY;
+ALTER TABLE seamstress_payments  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE audit_log            ENABLE ROW LEVEL SECURITY;
+ALTER TABLE templates            ENABLE ROW LEVEL SECURITY;
+ALTER TABLE accounts             ENABLE ROW LEVEL SECURITY;
+ALTER TABLE categories           ENABLE ROW LEVEL SECURITY;
+ALTER TABLE order_statuses       ENABLE ROW LEVEL SECURITY;
+ALTER TABLE order_status_history ENABLE ROW LEVEL SECURITY;
+ALTER TABLE deleted_records      ENABLE ROW LEVEL SECURITY;
 
--- Profiles: everyone reads, admin writes
-CREATE POLICY "profiles_read" ON profiles FOR SELECT USING (true);
-CREATE POLICY "profiles_admin" ON profiles FOR ALL USING (
-  EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'admin')
-);
+-- Profiles: читают все вошедшие, себя правит сам, всех — админ
+CREATE POLICY profiles_read  ON profiles FOR SELECT TO authenticated USING (true);
+CREATE POLICY profiles_self  ON profiles FOR UPDATE TO authenticated
+  USING (id = auth.uid()) WITH CHECK (id = auth.uid());
+CREATE POLICY profiles_admin ON profiles FOR ALL TO authenticated
+  USING (public.is_admin()) WITH CHECK (public.is_admin());
 
--- Orders: admin/editor see all, seamstress sees only assigned
-CREATE POLICY "orders_admin_editor" ON orders FOR ALL USING (
-  EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role IN ('admin', 'editor'))
-);
-CREATE POLICY "orders_seamstress" ON orders FOR SELECT USING (
-  assignee_id = auth.uid()
-);
+-- Orders: админ/редактор — всё, швея — только свои
+CREATE POLICY orders_staff ON orders FOR ALL TO authenticated
+  USING (public.is_staff()) WITH CHECK (public.is_staff());
+CREATE POLICY orders_seamstress_read ON orders FOR SELECT TO authenticated
+  USING (assignee_id = auth.uid());
+CREATE POLICY orders_seamstress_update ON orders FOR UPDATE TO authenticated
+  USING (assignee_id = auth.uid()) WITH CHECK (assignee_id = auth.uid());
 
--- Transactions: admin/editor only
-CREATE POLICY "transactions_admin_editor" ON transactions FOR ALL USING (
-  EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role IN ('admin', 'editor'))
-);
+CREATE POLICY transactions_staff ON transactions FOR ALL TO authenticated
+  USING (public.is_staff()) WITH CHECK (public.is_staff());
 
--- Clients: admin/editor only
-CREATE POLICY "clients_admin_editor" ON clients FOR ALL USING (
-  EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role IN ('admin', 'editor'))
-);
+CREATE POLICY clients_staff ON clients FOR ALL TO authenticated
+  USING (public.is_staff()) WITH CHECK (public.is_staff());
 
--- Cars: admin/editor only
-CREATE POLICY "cars_admin_editor" ON cars FOR ALL USING (
-  EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role IN ('admin', 'editor'))
-);
+CREATE POLICY cars_staff ON cars FOR ALL TO authenticated
+  USING (public.is_staff()) WITH CHECK (public.is_staff());
+CREATE POLICY cars_seamstress_read ON cars FOR SELECT TO authenticated
+  USING (EXISTS (SELECT 1 FROM orders o WHERE o.car_id = cars.id AND o.assignee_id = auth.uid()));
 
--- Notifications: user sees own
-CREATE POLICY "notifications_own" ON notifications FOR ALL USING (
-  user_id = auth.uid()
-);
+CREATE POLICY notifications_own ON notifications FOR ALL TO authenticated
+  USING (user_id = auth.uid()) WITH CHECK (user_id = auth.uid());
 
--- Seamstress payments: seamstress sees own, admin/editor see all
-CREATE POLICY "sp_admin_editor" ON seamstress_payments FOR ALL USING (
-  EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role IN ('admin', 'editor'))
-);
-CREATE POLICY "sp_seamstress" ON seamstress_payments FOR SELECT USING (
-  EXISTS (SELECT 1 FROM orders WHERE orders.id = order_id AND orders.assignee_id = auth.uid())
-);
+CREATE POLICY sp_staff ON seamstress_payments FOR ALL TO authenticated
+  USING (public.is_staff()) WITH CHECK (public.is_staff());
+CREATE POLICY sp_seamstress_read ON seamstress_payments FOR SELECT TO authenticated
+  USING (EXISTS (SELECT 1 FROM orders o
+                 WHERE o.id = seamstress_payments.order_id AND o.assignee_id = auth.uid()));
 
--- Audit log: admin only
-CREATE POLICY "audit_admin" ON audit_log FOR SELECT USING (
-  EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'admin')
-);
-CREATE POLICY "audit_insert" ON audit_log FOR INSERT WITH CHECK (true);
+CREATE POLICY audit_read   ON audit_log FOR SELECT TO authenticated USING (public.is_staff());
+CREATE POLICY audit_insert ON audit_log FOR INSERT TO authenticated WITH CHECK (public.is_authed());
 
--- Templates: everyone reads, admin writes
-CREATE POLICY "templates_read" ON templates FOR SELECT USING (true);
-CREATE POLICY "templates_admin" ON templates FOR ALL USING (
-  EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'admin')
-);
+CREATE POLICY templates_read  ON templates FOR SELECT TO authenticated USING (true);
+CREATE POLICY templates_write ON templates FOR ALL    TO authenticated
+  USING (public.is_staff()) WITH CHECK (public.is_staff());
+
+-- Справочники: читают все вошедшие
+CREATE POLICY accounts_read  ON accounts FOR SELECT TO authenticated USING (public.is_authed());
+CREATE POLICY accounts_write ON accounts FOR ALL    TO authenticated
+  USING (public.is_admin()) WITH CHECK (public.is_admin());
+
+CREATE POLICY categories_read  ON categories FOR SELECT TO authenticated USING (public.is_authed());
+CREATE POLICY categories_write ON categories FOR ALL    TO authenticated
+  USING (public.is_admin()) WITH CHECK (public.is_admin());
+
+CREATE POLICY order_statuses_read  ON order_statuses FOR SELECT TO authenticated USING (public.is_authed());
+CREATE POLICY order_statuses_write ON order_statuses FOR ALL    TO authenticated
+  USING (public.is_admin()) WITH CHECK (public.is_admin());
+
+CREATE POLICY osh_read   ON order_status_history FOR SELECT TO authenticated USING (public.is_authed());
+CREATE POLICY osh_insert ON order_status_history FOR INSERT TO authenticated WITH CHECK (public.is_authed());
+
+CREATE POLICY deleted_admin ON deleted_records FOR ALL TO authenticated
+  USING (public.is_admin()) WITH CHECK (public.is_admin());
 
 -- ═══════════════════════════════════════════
 -- TRIGGERS: auto-update updated_at

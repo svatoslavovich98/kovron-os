@@ -1,26 +1,42 @@
 "use client";
 
-import { use } from "react";
+import { useState } from "react";
 import Link from "next/link";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Avatar } from "@/components/ui/avatar";
 import { formatCurrency, formatDate, formatDateTime, cn } from "@/lib/utils";
-import { demoOrders, demoClients, demoCars, demoUsers, demoStatuses, kitLabels } from "@/lib/demo-data";
+import { useData } from "@/lib/data-context";
+import { kitLabels } from "@/lib/demo-data";
+import { OrderPhotoGallery } from "@/components/order-photo-gallery";
+import { isFinishedPhoto } from "@/lib/order-media";
+import { ReceivePaymentDialog } from "@/components/receive-payment-dialog";
+import type { OrderStatus } from "@/lib/types";
 import {
   ArrowLeft, Phone, MessageCircle, Calendar, Clock,
-  User, Wallet, Package, Palette, Camera, ChevronRight,
-  CheckCircle2, AlertTriangle,
+  User, Wallet, Package, Loader2, ChevronsUpDown, UserRound, Pencil, Printer,
 } from "lucide-react";
 
-export default function OrderDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = use(params);
-  const order = demoOrders.find((o) => o.id === id);
-  const client = order ? demoClients.find((c) => c.id === order.clientId) : null;
-  const car = order ? demoCars.find((c) => c.id === order.carId) : null;
-  const assignee = order?.assigneeId ? demoUsers.find((u) => u.id === order.assigneeId) : null;
-  const statusConfig = order ? demoStatuses.find((s) => s.key === order.status) : null;
+export default function OrderDetailPage({ params }: { params: { id: string } }) {
+  const { orders, clients, cars, users, statuses, auditLog, updateOrderStatus } = useData();
+  const [updatingStatus, setUpdatingStatus] = useState(false);
+  const { id } = params;
+  const order = orders.find((o) => o.id === id);
+  const client = order ? clients.find((c) => c.id === order.clientId) : null;
+  const car = order ? cars.find((c) => c.id === order.carId) : null;
+  const assignee = order?.assigneeId ? users.find((u) => u.id === order.assigneeId) : null;
+  const creator = order?.createdById ? users.find((u) => u.id === order.createdById) : null;
+  const statusConfig = order ? statuses.find((s) => s.key === order.status) : null;
+  const salonPhotos = order?.photos.filter(url => !isFinishedPhoto(url)) || [];
+  const finishedPhotos = order?.photos.filter(isFinishedPhoto) || [];
+  const orderEdits = auditLog.filter(entry => entry.entityType === "order" && entry.entityId === id);
+
+  const changeStatus = async (status: OrderStatus) => {
+    if (!order || status === order.status) return;
+    setUpdatingStatus(true);
+    await updateOrderStatus(order.id, status);
+    setUpdatingStatus(false);
+  };
 
   if (!order) {
     return (
@@ -46,15 +62,27 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
             {car?.brand} {car?.model} {car?.generation}
           </p>
         </div>
-        <Badge
-          className="text-xs"
-          style={{
-            backgroundColor: `${statusConfig?.color}20`,
-            color: statusConfig?.color,
-          }}
-        >
-          {statusConfig?.label}
-        </Badge>
+        <div className="relative shrink-0">
+          <select
+            value={order.status}
+            onChange={(event) => changeStatus(event.target.value as OrderStatus)}
+            disabled={updatingStatus}
+            className="appearance-none rounded-md border bg-card py-2 pl-3 pr-9 text-xs font-semibold outline-none cursor-pointer disabled:opacity-60"
+            style={{ color: statusConfig?.color, borderColor: `${statusConfig?.color}66` }}
+            aria-label="Изменить статус заказа"
+          >
+            {[...statuses].sort((a, b) => a.order - b.order).map((status) => (
+              <option key={status.key} value={status.key}>{status.label}</option>
+            ))}
+          </select>
+          {updatingStatus
+            ? <Loader2 className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin" />
+            : <ChevronsUpDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2" />}
+        </div>
+        <Link href={`/orders/${order.id}/edit`} className="p-2 rounded-sm border border-border bg-card hover:border-primary/40 transition-colors" title="Редактировать заказ">
+          <Pencil className="h-4 w-4" />
+        </Link>
+        <button onClick={() => window.print()} className="print-hide p-2 rounded-sm border border-border bg-card hover:border-primary/40 transition-colors" title="Печать заказа"><Printer className="h-4 w-4" /></button>
       </div>
 
       {/* Client */}
@@ -99,46 +127,16 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
         </CardContent>
       </Card>
 
-      {/* Colors */}
-      <Card>
-        <CardContent className="p-4">
-          <h3 className="text-sm font-semibold text-muted-foreground mb-3 flex items-center gap-2">
-            <Palette className="h-4 w-4" /> Производственные параметры
-          </h3>
-          <div className="grid grid-cols-3 gap-3">
-            {[
-              { label: "Материал", value: order.materialColor },
-              { label: "Окантовка", value: order.edgeColor },
-              { label: "Строчка", value: order.stitchColor },
-            ].map((item) => (
-              <div key={item.label} className="text-center">
-                <div
-                  className="h-10 w-10 rounded-full border-2 border-border mx-auto mb-1"
-                  style={{
-                    backgroundColor:
-                      item.value === "Чёрный" ? "#1a1a1a" :
-                      item.value === "Серый" ? "#6b6b6b" :
-                      item.value === "Бежевый" ? "#d4b896" :
-                      item.value === "Коричневый" ? "#6b4226" :
-                      item.value === "Синий" ? "#2a4494" :
-                      item.value === "Красный" ? "#b82020" :
-                      item.value === "Зелёный" ? "#2d6b3f" :
-                      "#f0f0f0",
-                  }}
-                />
-                <p className="text-xs text-muted-foreground">{item.label}</p>
-                <p className="text-sm font-medium">{item.value}</p>
-              </div>
-            ))}
-          </div>
-          {order.seamstressComment && (
-            <div className="mt-3 p-3 rounded-md bg-background text-sm">
-              <span className="text-muted-foreground">Для Оксаны: </span>
-              {order.seamstressComment}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+      {order.seamstressComment && <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground mb-1">Комментарий для Оксаны</p><p className="text-sm">{order.seamstressComment}</p></CardContent></Card>}
+
+      {(order.layoutImage || salonPhotos.length > 0 || finishedPhotos.length > 0) && (
+        <Card><CardContent className="p-4 space-y-5">
+          <h3 className="text-sm font-semibold text-muted-foreground">Фотографии заказа</h3>
+          <OrderPhotoGallery title="Раскладка" photos={order.layoutImage ? [order.layoutImage] : []} />
+          <OrderPhotoGallery title="Салон автомобиля" photos={salonPhotos} />
+          <OrderPhotoGallery title="Готовые коврики" photos={finishedPhotos} />
+        </CardContent></Card>
+      )}
 
       {/* Dates & Assignee */}
       <Card>
@@ -150,6 +148,13 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
             <div className="flex justify-between">
               <span className="text-muted-foreground">Создан</span>
               <span>{formatDate(order.createdAt)}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground">Создал заказ</span>
+              <div className="flex items-center gap-2">
+                {creator ? <Avatar name={creator.name} size="sm" /> : <UserRound className="h-4 w-4 text-muted-foreground" />}
+                <span className="font-medium">{creator?.name || "не указан"}</span>
+              </div>
             </div>
             {order.desiredDate && (
               <div className="flex justify-between">
@@ -199,6 +204,10 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
               <span className="font-medium">{formatCurrency(order.seamstressPayment)}</span>
             </div>
             <div className="flex justify-between">
+              <span className="text-muted-foreground">Оплата китайцам</span>
+              <span className="font-medium">{formatCurrency(order.chineseCost)}</span>
+            </div>
+            <div className="flex justify-between">
               <span className="text-muted-foreground">Материалы</span>
               <span>{formatCurrency(order.materialCost)}</span>
             </div>
@@ -211,10 +220,7 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
           </div>
 
           {order.remaining > 0 && (
-            <Button className="w-full mt-4" variant="income">
-              <Wallet className="h-4 w-4 mr-2" />
-              Получить оплату
-            </Button>
+            <ReceivePaymentDialog order={order} />
           )}
         </CardContent>
       </Card>
@@ -228,8 +234,8 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
             </h3>
             <div className="space-y-3">
               {order.statusHistory.map((change) => {
-                const oldS = demoStatuses.find((s) => s.key === change.oldStatus);
-                const newS = demoStatuses.find((s) => s.key === change.newStatus);
+                const oldS = statuses.find((s) => s.key === change.oldStatus);
+                const newS = statuses.find((s) => s.key === change.newStatus);
                 return (
                   <div key={change.id} className="flex items-center gap-3 text-sm">
                     <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
@@ -249,6 +255,21 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
             </div>
           </CardContent>
         </Card>
+      )}
+
+      {orderEdits.length > 0 && (
+        <Card><CardContent className="p-4">
+          <h3 className="text-sm font-semibold text-muted-foreground mb-3 flex items-center gap-2"><Pencil className="h-4 w-4" /> История изменений</h3>
+          <div className="space-y-3">
+            {orderEdits.map(entry => (
+              <div key={entry.id} className="flex items-start gap-3 text-sm">
+                <Avatar name={entry.userName || "?"} size="sm" />
+                <div className="flex-1 min-w-0"><p className="font-medium">{entry.userName}</p><p className="text-xs text-muted-foreground break-words">{entry.details}</p></div>
+                <span className="text-[10px] text-muted-foreground shrink-0">{formatDateTime(entry.timestamp)}</span>
+              </div>
+            ))}
+          </div>
+        </CardContent></Card>
       )}
     </div>
   );

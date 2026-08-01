@@ -2,7 +2,7 @@
 
 import { Card, CardContent } from "@/components/ui/card";
 import { formatCurrency } from "@/lib/utils";
-import { demoAccounts } from "@/lib/demo-data";
+import { useData } from "@/lib/data-context";
 import { Banknote, CreditCard, Building2, Wallet } from "lucide-react";
 
 const iconMap: Record<string, typeof Banknote> = {
@@ -10,7 +10,9 @@ const iconMap: Record<string, typeof Banknote> = {
 };
 
 export default function AccountsPage() {
-  const totalBalance = demoAccounts
+  const { accounts } = useData();
+
+  const totalBalance = accounts
     .filter((a) => a.active && a.showInTotal)
     .reduce((s, a) => s + a.balance, 0);
 
@@ -28,7 +30,7 @@ export default function AccountsPage() {
 
       {/* Accounts list */}
       <div className="space-y-3">
-        {demoAccounts.filter((a) => a.active).map((account) => {
+        {accounts.filter((a) => a.active).map((account) => {
           const Icon = iconMap[account.icon] || Wallet;
           return (
             <Card key={account.id} className="hover:border-primary/30 transition-colors cursor-pointer">

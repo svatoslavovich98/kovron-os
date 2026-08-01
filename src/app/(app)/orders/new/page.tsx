@@ -1,14 +1,17 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { formatCurrency, cn } from "@/lib/utils";
-import { demoUsers, materialColors, edgeColors, stitchColors, kitLabels, clientSources, demoClients } from "@/lib/demo-data";
+import { useData } from "@/lib/data-context";
+import { useAuth } from "@/lib/auth-context";
+import { kitLabels, clientSources } from "@/lib/demo-data";
+import { OrderPhotoPicker } from "@/components/order-photo-picker";
 import {
-  ArrowLeft, User, Car, Package, Palette, Camera,
+  ArrowLeft, User, Car, Package, ImagePlus, MessageSquare,
   Calendar, Wallet, ChevronRight, Check, Search,
 } from "lucide-react";
 import Link from "next/link";
@@ -17,8 +20,8 @@ const steps = [
   { key: "client", label: "Клиент", icon: User },
   { key: "car", label: "Автомобиль", icon: Car },
   { key: "kit", label: "Комплект", icon: Package },
-  { key: "production", label: "Параметры", icon: Palette },
-  { key: "images", label: "Изображения", icon: Camera },
+  { key: "images", label: "Фотографии", icon: ImagePlus },
+  { key: "details", label: "Комментарий", icon: MessageSquare },
   { key: "dates", label: "Сроки", icon: Calendar },
   { key: "finance", label: "Финансы", icon: Wallet },
 ];
@@ -26,10 +29,43 @@ const steps = [
 const kitOptions = Object.entries(kitLabels);
 
 export default function NewOrderPage() {
+  const { user } = useAuth();
+  const { users, clients, cars, createOrder, createClient, createCar } = useData();
   const router = useRouter();
   const [step, setStep] = useState(0);
   const [phone, setPhone] = useState("");
-  const [existingClient, setExistingClient] = useState<typeof demoClients[0] | null>(null);
+  const [existingClient, setExistingClient] = useState<typeof clients[0] | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const clientId = new URLSearchParams(window.location.search).get("clientId");
+    if (!clientId || existingClient) return;
+    const selected = clients.find(client => client.id === clientId);
+    if (!selected) return;
+    setExistingClient(selected);
+    setPhone(selected.phone);
+    setForm(prev => ({
+      ...prev,
+      clientName: selected.name,
+      clientPhone: selected.phone,
+      clientPhone2: selected.phone2 || "",
+      clientMessenger: selected.messenger || "",
+      clientComment: selected.comment || "",
+      clientSource: selected.source || "",
+    }));
+  }, [clients, existingClient]);
+
+  useEffect(() => {
+    const warn = (event: BeforeUnloadEvent) => {
+      if (!dirty) return;
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty]);
 
   const [form, setForm] = useState({
     clientName: "",
@@ -47,15 +83,8 @@ export default function NewOrderPage() {
     carRows: "",
     carPlateNumber: "",
     carComment: "",
+    existingCarId: "",
     kitTypes: [] as string[],
-    materialColor: "",
-    bottomColor: "",
-    edgeColor: "",
-    stitchColor: "",
-    stitchType: "",
-    logo: "",
-    heelPad: "",
-    extras: "",
     seamstressComment: "",
     desiredDate: "",
     assigneeId: "",
@@ -64,12 +93,17 @@ export default function NewOrderPage() {
     prepayment: "",
     prepaymentAccount: "",
     seamstressPayment: "",
+    chineseCost: "",
     materialCost: "",
     otherCosts: "",
+    layoutPhotos: [] as string[],
+    salonPhotos: [] as string[],
   });
 
   const updateForm = (field: string, value: string | string[]) => {
     setForm((prev) => ({ ...prev, [field]: value }));
+    setDirty(true);
+    setSaveError(null);
   };
 
   const toggleKit = (kit: string) => {
@@ -84,7 +118,7 @@ export default function NewOrderPage() {
   const checkExistingClient = (phoneVal: string) => {
     setPhone(phoneVal);
     updateForm("clientPhone", phoneVal);
-    const found = demoClients.find((c) => c.phone === phoneVal);
+    const found = clients.find((c) => c.phone === phoneVal);
     if (found) {
       setExistingClient(found);
       updateForm("clientName", found.name);
@@ -96,16 +130,84 @@ export default function NewOrderPage() {
   const totalPrice = parseFloat(form.totalPrice) || 0;
   const prepayment = parseFloat(form.prepayment) || 0;
   const seamstressPayment = parseFloat(form.seamstressPayment) || 0;
+  const chineseCost = parseFloat(form.chineseCost) || 0;
   const materialCost = parseFloat(form.materialCost) || 0;
   const otherCosts = parseFloat(form.otherCosts) || 0;
   const remaining = totalPrice - prepayment;
-  const totalCosts = seamstressPayment + materialCost + otherCosts;
+  const totalCosts = seamstressPayment + chineseCost + materialCost + otherCosts;
   const plannedProfit = totalPrice - totalCosts;
 
-  const handleSave = () => {
-    // In production, save to Supabase
-    alert("Заказ создан! (демо-режим)");
-    router.push("/orders");
+  const handleSave = async () => {
+    if (saving) return;
+    setSaving(true);
+    setSaveError(null);
+    try {
+      // Create client if new
+      let clientId = existingClient?.id;
+      if (!clientId && form.clientName && form.clientPhone) {
+        const newClient = await createClient({
+          name: form.clientName,
+          phone: form.clientPhone,
+          phone2: form.clientPhone2 || undefined,
+          messenger: form.clientMessenger || undefined,
+          comment: form.clientComment || undefined,
+          source: form.clientSource || undefined,
+        });
+        clientId = newClient?.id;
+      }
+
+      // Create car
+      let carId: string | undefined = form.existingCarId || undefined;
+      if (!carId && clientId && form.carBrand && form.carModel) {
+        const newCar = await createCar({
+          clientId,
+          brand: form.carBrand,
+          model: form.carModel,
+          generation: form.carGeneration || undefined,
+          year: form.carYear ? parseInt(form.carYear) : undefined,
+          body: form.carBody || undefined,
+          plateNumber: form.carPlateNumber || undefined,
+        });
+        carId = newCar?.id;
+      }
+
+      if (!clientId || !carId) {
+        setSaveError("Не удалось создать клиента или автомобиль. Проверьте обязательные поля.");
+        setSaving(false);
+        return;
+      }
+
+      const order = await createOrder({
+        createdById: user?.id,
+        clientId,
+        carId,
+        kitTypes: form.kitTypes as any,
+        layoutImage: form.layoutPhotos[0],
+        photos: form.salonPhotos,
+        seamstressComment: form.seamstressComment || undefined,
+        assigneeId: form.assigneeId || undefined,
+        priority: form.priority as any,
+        desiredDate: form.desiredDate || undefined,
+        totalPrice: totalPrice,
+        prepayment: prepayment,
+        seamstressPayment: seamstressPayment,
+        chineseCost: chineseCost,
+        materialCost: materialCost,
+        otherCosts: otherCosts,
+      });
+
+      if (order) {
+        setDirty(false);
+        router.push("/orders");
+      } else {
+        setSaveError("Не удалось создать заказ. Проверьте соединение и повторите попытку.");
+      }
+    } catch (err) {
+      console.error("Save error:", err);
+      setSaveError("Произошла ошибка при сохранении. Попробуйте ещё раз.");
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -210,6 +312,28 @@ export default function NewOrderPage() {
             <>
               <h2 className="font-semibold text-lg">Автомобиль</h2>
               <div className="space-y-3">
+                {existingClient && cars.some(car => car.clientId === existingClient.id) && (
+                  <div>
+                    <label className="text-sm text-muted-foreground mb-2 block">Автомобили клиента</label>
+                    <div className="grid sm:grid-cols-2 gap-2">
+                      {cars.filter(car => car.clientId === existingClient.id).map(car => (
+                        <button
+                          type="button"
+                          key={car.id}
+                          onClick={() => {
+                            setForm(prev => ({ ...prev, existingCarId: car.id, carBrand: car.brand, carModel: car.model, carGeneration: car.generation || "", carYear: car.year ? String(car.year) : "", carBody: car.body || "", carPlateNumber: car.plateNumber || "" }));
+                            setDirty(true);
+                          }}
+                          className={cn("p-3 rounded-md border text-left transition-colors", form.existingCarId === car.id ? "border-primary bg-primary/10" : "border-border hover:border-primary/40")}
+                        >
+                          <p className="text-sm font-medium">{car.brand} {car.model}</p>
+                          <p className="text-xs text-muted-foreground">{[car.generation, car.year, car.plateNumber].filter(Boolean).join(" · ")}</p>
+                        </button>
+                      ))}
+                    </div>
+                    <button type="button" onClick={() => updateForm("existingCarId", "")} className="text-xs text-primary hover:underline mt-2">Добавить другой автомобиль</button>
+                  </div>
+                )}
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="text-sm text-muted-foreground mb-1 block">Марка</label>
@@ -269,64 +393,43 @@ export default function NewOrderPage() {
 
           {step === 3 && (
             <>
-              <h2 className="font-semibold text-lg">Производственные параметры</h2>
-              <div className="space-y-4">
-                {[
-                  { label: "Цвет основного материала", field: "materialColor", colors: materialColors },
-                  { label: "Цвет окантовки", field: "edgeColor", colors: edgeColors },
-                  { label: "Цвет строчки", field: "stitchColor", colors: stitchColors },
-                ].map((section) => (
-                  <div key={section.field}>
-                    <label className="text-sm text-muted-foreground mb-2 block">{section.label}</label>
-                    <div className="flex flex-wrap gap-2">
-                      {section.colors.map((c) => (
-                        <button
-                          key={c.name}
-                          onClick={() => updateForm(section.field, c.name)}
-                          className={cn(
-                            "flex items-center gap-2 px-3 py-2 rounded-sm border text-sm transition-all",
-                            form[section.field as keyof typeof form] === c.name
-                              ? "border-primary bg-primary/5"
-                              : "border-border hover:border-primary/30"
-                          )}
-                        >
-                          <div className="h-5 w-5 rounded-full border border-border" style={{ backgroundColor: c.hex }} />
-                          {c.name}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-                <div>
-                  <label className="text-sm text-muted-foreground mb-1 block">Комментарий для Оксаны</label>
-                  <Input
-                    placeholder="Особые пожелания..."
-                    value={form.seamstressComment}
-                    onChange={(e) => updateForm("seamstressComment", e.target.value)}
-                  />
-                </div>
+              <h2 className="font-semibold text-lg">Фотографии заказа</h2>
+              <p className="text-sm text-muted-foreground">
+                Эти фотографии будут доступны Оксане и сохранятся в карточке заказа.
+              </p>
+              <div className="space-y-6">
+                <OrderPhotoPicker
+                  label="Раскладка"
+                  hint="Можно добавить сейчас или позже при редактировании заказа"
+                  kind="layout"
+                  urls={form.layoutPhotos}
+                  onChange={(urls) => updateForm("layoutPhotos", urls)}
+                  max={1}
+                />
+                <OrderPhotoPicker
+                  label="Салон автомобиля"
+                  hint="До четырёх фотографий; можно добавить позже"
+                  kind="salon"
+                  urls={form.salonPhotos}
+                  onChange={(urls) => updateForm("salonPhotos", urls)}
+                  max={4}
+                />
               </div>
             </>
           )}
 
           {step === 4 && (
             <>
-              <h2 className="font-semibold text-lg">Изображения</h2>
-              <p className="text-sm text-muted-foreground">
-                В демо-режиме загрузка изображений недоступна. Подключите Supabase Storage для работы с файлами.
-              </p>
-              <div className="grid grid-cols-2 gap-3">
-                {["Раскладка", "Фото салона", "Фото автомобиля", "Фото замера"].map((label) => (
-                  <div
-                    key={label}
-                    className="aspect-square rounded-md border-2 border-dashed border-border flex items-center justify-center hover:border-primary/30 transition-colors cursor-pointer"
-                  >
-                    <div className="text-center">
-                      <Camera className="h-8 w-8 text-muted-foreground mx-auto mb-1" />
-                      <span className="text-xs text-muted-foreground">{label}</span>
-                    </div>
-                  </div>
-                ))}
+              <h2 className="font-semibold text-lg">Комментарий</h2>
+              <div className="space-y-4">
+                <div>
+                  <label className="text-sm text-muted-foreground mb-1 block">Комментарий для Оксаны</label>
+                  <Input
+                    placeholder="Особые пожелания по заказу..."
+                    value={form.seamstressComment}
+                    onChange={(e) => updateForm("seamstressComment", e.target.value)}
+                  />
+                </div>
               </div>
             </>
           )}
@@ -342,7 +445,7 @@ export default function NewOrderPage() {
                 <div>
                   <label className="text-sm text-muted-foreground mb-1 block">Исполнитель</label>
                   <div className="flex gap-2">
-                    {demoUsers.filter((u) => u.role === "seamstress").map((u) => (
+                    {users.filter((u) => u.role === "seamstress").map((u) => (
                       <button
                         key={u.id}
                         onClick={() => updateForm("assigneeId", u.id)}
@@ -423,6 +526,16 @@ export default function NewOrderPage() {
                   />
                 </div>
 
+                <div>
+                  <label className="text-sm text-muted-foreground mb-1 block">Оплата китайцам</label>
+                  <Input
+                    type="number"
+                    placeholder="3000"
+                    value={form.chineseCost}
+                    onChange={(e) => updateForm("chineseCost", e.target.value)}
+                  />
+                </div>
+
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="text-sm text-muted-foreground mb-1 block">Расходы на материалы</label>
@@ -453,6 +566,7 @@ export default function NewOrderPage() {
       </Card>
 
       {/* Navigation buttons */}
+      {saveError && <div className="rounded-md border border-expense/30 bg-expense/10 p-3 text-sm text-expense">{saveError}</div>}
       <div className="flex gap-3">
         {step > 0 && (
           <Button variant="outline" onClick={() => setStep(step - 1)} className="flex-1">
@@ -465,9 +579,9 @@ export default function NewOrderPage() {
             <ChevronRight className="h-4 w-4 ml-1" />
           </Button>
         ) : (
-          <Button onClick={handleSave} className="flex-1">
+          <Button onClick={handleSave} disabled={saving} className="flex-1">
             <Check className="h-4 w-4 mr-1" />
-            Создать заказ
+            {saving ? "Сохранение…" : "Создать заказ"}
           </Button>
         )}
       </div>

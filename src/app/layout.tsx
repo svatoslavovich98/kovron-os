@@ -26,11 +26,28 @@ export const viewport: Viewport = {
   themeColor: "#111311",
 };
 
+// Выполняется до первой отрисовки — иначе при загрузке страница
+// моргает тёмной темой, даже если сохранена светлая.
+const themeInitScript = `
+(function(){
+  try {
+    var t = localStorage.getItem('kovron-theme');
+    if (t !== 'light' && t !== 'dark') t = 'light';
+    var r = document.documentElement;
+    if (t === 'dark') r.classList.add('dark'); else r.classList.remove('dark');
+    r.style.colorScheme = t;
+  } catch (e) {
+    document.documentElement.classList.remove('dark');
+  }
+})();
+`;
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="ru" className="dark" suppressHydrationWarning>
+    <html lang="ru" suppressHydrationWarning>
       <head>
         <link rel="apple-touch-icon" sizes="180x180" href="/icons/icon-192.png" />
+        <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
       </head>
       <body className={`${inter.variable} font-sans`}>
         <Providers>{children}</Providers>

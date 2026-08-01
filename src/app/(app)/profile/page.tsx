@@ -1,7 +1,9 @@
 "use client";
 
 import { useAuth } from "@/lib/auth-context";
+import { useTheme } from "@/lib/theme-context";
 import { useRouter } from "next/navigation";
+import { cn } from "@/lib/utils";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Avatar } from "@/components/ui/avatar";
@@ -11,6 +13,7 @@ import { LogOut, Shield, Clock, Moon, Sun } from "lucide-react";
 
 export default function ProfilePage() {
   const { user, logout } = useAuth();
+  const { theme, setTheme } = useTheme();
   const router = useRouter();
 
   if (!user) return null;
@@ -57,14 +60,25 @@ export default function ProfilePage() {
         <CardContent className="p-4">
           <h3 className="text-sm font-semibold mb-3">Оформление</h3>
           <div className="flex gap-3">
-            <button className="flex-1 flex items-center justify-center gap-2 p-3 rounded-md border border-primary bg-primary/5 text-sm font-medium">
-              <Moon className="h-4 w-4" />
-              Тёмная
-            </button>
-            <button className="flex-1 flex items-center justify-center gap-2 p-3 rounded-md border border-border text-sm font-medium text-muted-foreground">
-              <Sun className="h-4 w-4" />
-              Светлая
-            </button>
+            {[
+              { key: "dark" as const, label: "Тёмная", Icon: Moon },
+              { key: "light" as const, label: "Светлая", Icon: Sun },
+            ].map(({ key, label, Icon }) => (
+              <button
+                key={key}
+                onClick={() => setTheme(key)}
+                aria-pressed={theme === key}
+                className={cn(
+                  "flex-1 flex items-center justify-center gap-2 p-3 rounded-md border text-sm font-medium transition-colors",
+                  theme === key
+                    ? "border-primary bg-primary/5 text-foreground"
+                    : "border-border text-muted-foreground hover:text-foreground hover:border-primary/30"
+                )}
+              >
+                <Icon className="h-4 w-4" />
+                {label}
+              </button>
+            ))}
           </div>
         </CardContent>
       </Card>
@@ -75,7 +89,7 @@ export default function ProfilePage() {
       </Button>
 
       <p className="text-center text-xs text-muted-foreground">
-        KOVRON OS v0.1.0 • Демо-режим
+        KOVRON OS v1.0.0
       </p>
     </div>
   );

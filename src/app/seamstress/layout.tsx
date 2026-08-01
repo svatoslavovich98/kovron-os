@@ -24,10 +24,19 @@ export default function SeamstressLayout({ children }: { children: React.ReactNo
 
   return (
     <div className="min-h-screen bg-background">
-      <header className="sticky top-0 z-50 border-b border-border bg-card/95 backdrop-blur-lg px-4 py-3 flex items-center justify-between">
-        <h1 className="text-lg font-bold">
-          KOVRON <span className="text-primary">OS</span>
-        </h1>
+      <header className="sticky top-0 z-50 border-b border-border glass px-4 py-3 flex items-center justify-between">
+        <div className="flex items-center gap-2.5">
+          <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-primary/20 to-primary/5 border border-primary/20 flex items-center justify-center">
+            <svg width="16" height="16" viewBox="-80 -110 160 240" fill="none">
+              <rect x="-80" y="-110" width="28" height="220" rx="6" fill="hsl(var(--primary))"/>
+              <path d="M-40,-20 L60,-110 L80,-90 L-20,0Z" fill="hsl(var(--primary))"/>
+              <path d="M-40,20 L80,110 L60,130 L-52,40Z" fill="hsl(var(--primary))" opacity="0.8"/>
+            </svg>
+          </div>
+          <h1 className="text-lg font-bold">
+            KOVRON <span className="text-primary">OS</span>
+          </h1>
+        </div>
         <button
           onClick={() => { logout(); router.replace("/login"); }}
           className="p-2 hover:bg-background rounded-sm transition-colors text-muted-foreground"

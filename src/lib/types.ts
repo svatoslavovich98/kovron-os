@@ -87,13 +87,15 @@ export interface Order {
   heelPadPosition?: string;
   extras?: string;
   seamstressComment?: string;
-  layoutImage?: string;
+  layoutImage?: string | null;
   photos: string[];
-  assigneeId?: string;
+  assigneeId?: string | null;
   assignee?: User;
+  createdById?: string;
+  creator?: User;
   priority: "low" | "normal" | "high" | "urgent";
   createdAt: string;
-  desiredDate?: string;
+  desiredDate?: string | null;
   deliveryDate?: string;
   totalPrice: number;
   prepayment: number;
@@ -101,6 +103,7 @@ export interface Order {
   remaining: number;
   seamstressPayment: number;
   seamstressPaymentStatus: "planned" | "accrued" | "paid";
+  chineseCost: number;
   materialCost: number;
   otherCosts: number;
   plannedProfit: number;
@@ -205,7 +208,10 @@ export interface TemplateItem {
   name: string;
   type: "pol" | "bag" | "rh";
   img?: string;
+  hasImage?: boolean;
 }
+
+export type TemplatesByBrand = Record<string, TemplateItem[]>;
 
 export interface PeriodFilter {
   type: "today" | "week" | "month" | "year" | "custom";
