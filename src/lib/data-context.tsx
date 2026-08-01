@@ -122,6 +122,55 @@ function describeOrderUpdates(updates: Partial<Order>) {
   return Object.keys(updates).map(key => orderFieldLabels[key as keyof Order] || key).join(", ");
 }
 
+function mapClientRow(c: Record<string, any>): Client {
+  return {
+    id: c.id, name: c.name, phone: c.phone, phone2: c.phone2,
+    messenger: c.messenger, comment: c.comment, source: c.source,
+    createdAt: c.created_at,
+  };
+}
+
+function mapCarRow(c: Record<string, any>): Car {
+  return {
+    id: c.id, clientId: c.client_id, brand: c.brand, model: c.model,
+    generation: c.generation, year: c.year, body: c.body,
+    trim: c.trim, rows: c.rows, plateNumber: c.plate_number,
+    comment: c.comment,
+  };
+}
+
+function mapOrderRow(o: Record<string, any>): Order {
+  return {
+    id: o.id, number: o.number, clientId: o.client_id, carId: o.car_id,
+    status: o.status, kitTypes: o.kit_types || [],
+    materialColor: o.material_color || "", bottomColor: o.bottom_color,
+    edgeColor: o.edge_color || "", stitchColor: o.stitch_color || "",
+    stitchType: o.stitch_type, logo: o.logo,
+    heelPadPosition: o.heel_pad_position, extras: o.extras,
+    seamstressComment: o.seamstress_comment,
+    layoutImage: o.layout_image, photos: o.photos || [],
+    assigneeId: o.assignee_id, priority: o.priority || "normal",
+    createdById: o.created_by,
+    createdAt: o.created_at, desiredDate: o.desired_date,
+    deliveryDate: o.delivery_date,
+    totalPrice: Number(o.total_price || 0),
+    prepayment: Number(o.prepayment || 0),
+    paid: Number(o.paid || 0),
+    remaining: Number(o.remaining || 0),
+    seamstressPayment: Number(o.seamstress_payment || 0),
+    seamstressPaymentStatus: o.seamstress_payment_status || "planned",
+    chineseCost: Number(o.chinese_cost || 0),
+    materialCost: Number(o.material_cost || 0),
+    otherCosts: Number(o.other_costs || 0),
+    plannedProfit: Number(o.planned_profit || 0),
+    statusHistory: (o.order_status_history || []).map((h: Record<string, any>) => ({
+      id: h.id, userId: h.user_id, userName: h.user_name || "",
+      oldStatus: h.old_status, newStatus: h.new_status,
+      timestamp: h.created_at,
+    })),
+  } as Order;
+}
+
 function getAdminErrorMessage(error: { message?: string; details?: string } | null) {
   const message = `${error?.message || ""} ${error?.details || ""}`.toLowerCase();
   if (message.includes("duplicate") || message.includes("unique")) return "Такой логин или системный ключ уже используется";
@@ -368,6 +417,7 @@ function useSupabaseData(): AppData {
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const syncingCoreData = useRef(false);
 
   const fetchAll = useCallback(async () => {
     const sb = getSupabase();
@@ -432,46 +482,9 @@ function useSupabaseData(): AppData {
           requireComment: c.require_comment ?? false,
           requireReceipt: c.require_receipt ?? false,
         })),
-        clients: (clients || []).map(c => ({
-          id: c.id, name: c.name, phone: c.phone, phone2: c.phone2,
-          messenger: c.messenger, comment: c.comment, source: c.source,
-          createdAt: c.created_at,
-        })),
-        cars: (cars || []).map(c => ({
-          id: c.id, clientId: c.client_id, brand: c.brand, model: c.model,
-          generation: c.generation, year: c.year, body: c.body,
-          trim: c.trim, rows: c.rows, plateNumber: c.plate_number,
-          comment: c.comment,
-        })),
-        orders: (rawOrders || []).map(o => ({
-          id: o.id, number: o.number, clientId: o.client_id, carId: o.car_id,
-          status: o.status, kitTypes: o.kit_types || [],
-          materialColor: o.material_color || "", bottomColor: o.bottom_color,
-          edgeColor: o.edge_color || "", stitchColor: o.stitch_color || "",
-          stitchType: o.stitch_type, logo: o.logo,
-          heelPadPosition: o.heel_pad_position, extras: o.extras,
-          seamstressComment: o.seamstress_comment,
-          layoutImage: o.layout_image, photos: o.photos || [],
-          assigneeId: o.assignee_id, priority: o.priority || "normal",
-          createdById: o.created_by,
-          createdAt: o.created_at, desiredDate: o.desired_date,
-          deliveryDate: o.delivery_date,
-          totalPrice: Number(o.total_price || 0),
-          prepayment: Number(o.prepayment || 0),
-          paid: Number(o.paid || 0),
-          remaining: Number(o.remaining || 0),
-          seamstressPayment: Number(o.seamstress_payment || 0),
-          seamstressPaymentStatus: o.seamstress_payment_status || "planned",
-          chineseCost: Number(o.chinese_cost || 0),
-          materialCost: Number(o.material_cost || 0),
-          otherCosts: Number(o.other_costs || 0),
-          plannedProfit: Number(o.planned_profit || 0),
-          statusHistory: (o.order_status_history || []).map((h: any) => ({
-            id: h.id, userId: h.user_id, userName: h.user_name || "",
-            oldStatus: h.old_status, newStatus: h.new_status,
-            timestamp: h.created_at,
-          })),
-        })),
+        clients: (clients || []).map(mapClientRow),
+        cars: (cars || []).map(mapCarRow),
+        orders: (rawOrders || []).map(mapOrderRow),
         transactions: (transactions || []).map(t => ({
           id: t.id, type: t.type, amount: Number(t.amount),
           categoryId: t.category_id, accountId: t.account_id,
@@ -511,9 +524,67 @@ function useSupabaseData(): AppData {
     setLoading(false);
   }, [user]);
 
+  const syncCoreData = useCallback(async () => {
+    const sb = getSupabase();
+    if (!sb || !user || syncingCoreData.current) return;
+    syncingCoreData.current = true;
+    try {
+      const [clientsResult, carsResult, ordersResult] = await Promise.all([
+        sb.from("clients").select("*").order("created_at", { ascending: false }),
+        sb.from("cars").select("*"),
+        sb.from("orders").select("*, order_status_history(*)").order("created_at", { ascending: false }),
+      ]);
+      const firstError = clientsResult.error || carsResult.error || ordersResult.error;
+      if (firstError) throw firstError;
+      setData(prev => ({
+        ...prev,
+        clients: (clientsResult.data || []).map(mapClientRow),
+        cars: (carsResult.data || []).map(mapCarRow),
+        orders: (ordersResult.data || []).map(mapOrderRow),
+      }));
+      setError(null);
+    } catch (syncError) {
+      console.error("Background data sync error:", syncError);
+    } finally {
+      syncingCoreData.current = false;
+    }
+  }, [user]);
+
   useEffect(() => {
     if (user) fetchAll();
   }, [user, fetchAll]);
+
+  useEffect(() => {
+    if (!user) return;
+    const sb = getSupabase();
+    let debounceTimer: number | undefined;
+    const scheduleSync = () => {
+      window.clearTimeout(debounceTimer);
+      debounceTimer = window.setTimeout(() => void syncCoreData(), 350);
+    };
+    const syncWhenVisible = () => {
+      if (document.visibilityState === "visible") scheduleSync();
+    };
+
+    window.addEventListener("focus", scheduleSync);
+    window.addEventListener("online", scheduleSync);
+    document.addEventListener("visibilitychange", syncWhenVisible);
+    const interval = window.setInterval(syncWhenVisible, 30000);
+    const channel = sb?.channel(`kovron-core-sync-${user.id}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "orders" }, scheduleSync)
+      .on("postgres_changes", { event: "*", schema: "public", table: "clients" }, scheduleSync)
+      .on("postgres_changes", { event: "*", schema: "public", table: "cars" }, scheduleSync)
+      .subscribe();
+
+    return () => {
+      window.clearTimeout(debounceTimer);
+      window.clearInterval(interval);
+      window.removeEventListener("focus", scheduleSync);
+      window.removeEventListener("online", scheduleSync);
+      document.removeEventListener("visibilitychange", syncWhenVisible);
+      if (channel && sb) void sb.removeChannel(channel);
+    };
+  }, [user, syncCoreData]);
 
   // ── Mutations ──────────────────────────────────────────
   const createOrder = useCallback(async (o: Partial<Order>): Promise<Order | null> => {
@@ -986,7 +1057,7 @@ function useSupabaseData(): AppData {
     error,
     createOrder, updateOrder, updateOrderStatus,
     createClient, updateClient, createTransaction,
-    createCar, updateCar, addTemplate, refresh: fetchAll,
+    createCar, updateCar, addTemplate, refresh: syncCoreData,
     markNotificationRead, markAllNotificationsRead,
     receiveOrderPayment,
     recordOrderAudit,

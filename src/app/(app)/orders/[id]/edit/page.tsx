@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import Link from "next/link";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, Check, Loader2, Save } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -14,9 +13,22 @@ import { cn } from "@/lib/utils";
 import { isFinishedPhoto } from "@/lib/order-media";
 import type { KitType } from "@/lib/types";
 
+function withTimeout<T>(promise: Promise<T>, milliseconds: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = window.setTimeout(() => reject(new Error("Сохранение заняло слишком много времени")), milliseconds);
+    promise.then(value => {
+      window.clearTimeout(timer);
+      resolve(value);
+    }, error => {
+      window.clearTimeout(timer);
+      reject(error);
+    });
+  });
+}
+
 export default function EditOrderPage({ params }: { params: { id: string } }) {
   const router = useRouter();
-  const { orders, clients, cars, users, loading, updateOrder, updateClient, updateCar, recordOrderAudit } = useData();
+  const { orders, clients, cars, users, loading, updateOrder, updateClient, updateCar, recordOrderAudit, refresh } = useData();
   const order = orders.find(item => item.id === params.id);
   const client = order ? clients.find(item => item.id === order.clientId) : undefined;
   const car = order ? cars.find(item => item.id === order.carId) : undefined;
@@ -26,6 +38,10 @@ export default function EditOrderPage({ params }: { params: { id: string } }) {
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [savingLabel, setSavingLabel] = useState("Сохраняем изменения…");
+  const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
+  const [draftRestored, setDraftRestored] = useState(false);
+  const initializedOrderId = useRef<string | null>(null);
   const [form, setForm] = useState({
     clientName: "", clientPhone: "", clientPhone2: "", clientMessenger: "", clientComment: "", clientSource: "",
     carBrand: "", carModel: "", carGeneration: "", carYear: "", carBody: "", carPlateNumber: "", carComment: "",
@@ -36,7 +52,9 @@ export default function EditOrderPage({ params }: { params: { id: string } }) {
 
   useEffect(() => {
     if (!order || !client || !car) return;
-    setForm({
+    if (initializedOrderId.current === order.id) return;
+    initializedOrderId.current = order.id;
+    const serverForm = {
       clientName: client.name || "", clientPhone: client.phone || "", clientPhone2: client.phone2 || "",
       clientMessenger: client.messenger || "", clientComment: client.comment || "", clientSource: client.source || "",
       carBrand: car.brand || "", carModel: car.model || "", carGeneration: car.generation || "",
@@ -46,19 +64,45 @@ export default function EditOrderPage({ params }: { params: { id: string } }) {
       seamstressPayment: String(order.seamstressPayment || ""),
       chineseCost: String(order.chineseCost || ""), materialCost: String(order.materialCost || ""), otherCosts: String(order.otherCosts || ""),
       seamstressComment: order.seamstressComment || "", layoutPhotos: order.layoutImage ? [order.layoutImage] : [], salonPhotos: initialSalonPhotos,
-    });
+    };
+    try {
+      const savedDraft = window.localStorage.getItem(`kovron-order-draft-${order.id}`);
+      if (savedDraft) {
+        const parsed = JSON.parse(savedDraft) as { form?: Partial<typeof serverForm> };
+        setForm({ ...serverForm, ...(parsed.form || {}) });
+        setDirty(true);
+        setDraftRestored(true);
+        return;
+      }
+    } catch {
+      window.localStorage.removeItem(`kovron-order-draft-${order.id}`);
+    }
+    setForm(serverForm);
     setDirty(false);
+    setDraftRestored(false);
   }, [order?.id, client?.id, car?.id, initialSalonPhotos]);
 
   useEffect(() => {
+    if (!dirty || !order) return;
+    const timer = window.setTimeout(() => {
+      try {
+        window.localStorage.setItem(`kovron-order-draft-${order.id}`, JSON.stringify({ form, updatedAt: new Date().toISOString() }));
+      } catch {
+        // The server save remains available even if the browser has no room for a local draft.
+      }
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [dirty, form, order]);
+
+  useEffect(() => {
     const warn = (event: BeforeUnloadEvent) => {
-      if (!dirty) return;
+      if (!dirty && !saving) return;
       event.preventDefault();
       event.returnValue = "";
     };
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
-  }, [dirty]);
+  }, [dirty, saving]);
 
   const update = <K extends keyof typeof form>(key: K, value: typeof form[K]) => {
     setForm(prev => ({ ...prev, [key]: value }));
@@ -89,19 +133,21 @@ export default function EditOrderPage({ params }: { params: { id: string } }) {
       return;
     }
     setSaving(true);
+    setSavingLabel("Сохраняем изменения…");
     setMessage(null);
     const clientChanged = form.clientName.trim() !== client.name || form.clientPhone.trim() !== client.phone || form.clientPhone2 !== (client.phone2 || "") || form.clientMessenger !== (client.messenger || "") || form.clientComment !== (client.comment || "") || form.clientSource !== (client.source || "");
-    const carChanged = form.carBrand.trim() !== car.brand || form.carModel.trim() !== car.model || form.carGeneration !== (car.generation || "") || form.carYear !== (car.year ? String(car.year) : "") || form.carBody !== (car.body || "") || form.carPlateNumber !== (car.plateNumber || "");
-    const [clientOk, carOk, orderOk] = await Promise.all([
-      updateClient(client.id, {
+    const carChanged = form.carBrand.trim() !== car.brand || form.carModel.trim() !== car.model || form.carGeneration !== (car.generation || "") || form.carYear !== (car.year ? String(car.year) : "") || form.carBody !== (car.body || "") || form.carPlateNumber !== (car.plateNumber || "") || form.carComment !== (car.comment || "");
+    try {
+      const [clientOk, carOk, orderOk] = await withTimeout(Promise.all([
+      clientChanged ? updateClient(client.id, {
         name: form.clientName.trim(), phone: form.clientPhone.trim(), phone2: form.clientPhone2 || undefined,
         messenger: form.clientMessenger || undefined, comment: form.clientComment || undefined, source: form.clientSource || undefined,
-      }),
-      updateCar(car.id, {
+      }) : Promise.resolve(true),
+      carChanged ? updateCar(car.id, {
         brand: form.carBrand.trim(), model: form.carModel.trim(), generation: form.carGeneration || undefined,
         year: form.carYear ? Number(form.carYear) : undefined, body: form.carBody || undefined,
         plateNumber: form.carPlateNumber || undefined, comment: form.carComment || undefined,
-      }),
+      }) : Promise.resolve(true),
       updateOrder(order.id, {
         kitTypes: form.kitTypes, assigneeId: form.assigneeId || null,
         desiredDate: form.desiredDate || null, priority: form.priority as typeof order.priority,
@@ -111,16 +157,37 @@ export default function EditOrderPage({ params }: { params: { id: string } }) {
         seamstressComment: form.seamstressComment, layoutImage: form.layoutPhotos[0] || null,
         photos: [...form.salonPhotos, ...finishedPhotos],
       }),
-    ]);
-    setSaving(false);
-    if (clientOk && carOk && orderOk) {
-      const relatedChanges = [clientChanged ? "данные клиента" : "", carChanged ? "данные автомобиля" : ""].filter(Boolean);
-      if (relatedChanges.length) await recordOrderAudit(order.id, `Изменены: ${relatedChanges.join(", ")}`);
-      setDirty(false);
-      router.push(`/orders/${order.id}`);
-    } else {
-      setMessage("Не все изменения удалось сохранить. Проверьте соединение и повторите попытку.");
+      ]), 25000);
+      if (clientOk && carOk && orderOk) {
+        const relatedChanges = [clientChanged ? "данные клиента" : "", carChanged ? "данные автомобиля" : ""].filter(Boolean);
+        if (relatedChanges.length) await recordOrderAudit(order.id, `Изменены: ${relatedChanges.join(", ")}`);
+        setSavingLabel("Проверяем сохранённые данные…");
+        await withTimeout(refresh(), 10000).catch(() => undefined);
+        window.localStorage.removeItem(`kovron-order-draft-${order.id}`);
+        setDirty(false);
+        setDraftRestored(false);
+        router.push(`/orders/${order.id}`);
+        return;
+      }
+      setMessage("Не все изменения удалось сохранить. Черновик сохранён — проверьте соединение и повторите попытку.");
+    } catch (error) {
+      console.error("Save order error:", error);
+      setMessage("Не удалось сохранить изменения. Черновик сохранён — можно повторить попытку.");
+    } finally {
+      setSaving(false);
     }
+  };
+
+  const requestExit = () => {
+    if (saving) return;
+    if (dirty) setShowLeaveConfirm(true);
+    else router.push(`/orders/${params.id}`);
+  };
+
+  const leaveWithDraft = () => {
+    setDirty(false);
+    setShowLeaveConfirm(false);
+    router.push(`/orders/${params.id}`);
   };
 
   if (loading || !order || !client || !car) {
@@ -130,7 +197,7 @@ export default function EditOrderPage({ params }: { params: { id: string } }) {
   return (
     <div className="p-4 lg:p-6 max-w-4xl mx-auto space-y-4 pb-28">
       <div className="flex items-center gap-3">
-        <Link href={`/orders/${order.id}`} className="p-2 rounded-sm hover:bg-card"><ArrowLeft className="h-5 w-5" /></Link>
+        <button type="button" onClick={requestExit} className="p-2 rounded-sm hover:bg-card" aria-label="Вернуться к заказу"><ArrowLeft className="h-5 w-5" /></button>
         <div className="flex-1">
           <h1 className="text-xl font-bold">Редактирование заказа №{order.number}</h1>
           <p className="text-xs text-muted-foreground mt-0.5">Изменения будут записаны в журнал действий</p>
@@ -138,6 +205,7 @@ export default function EditOrderPage({ params }: { params: { id: string } }) {
       </div>
 
       {message && <div className="rounded-md border border-expense/30 bg-expense/10 p-3 text-sm text-expense">{message}</div>}
+      {draftRestored && <div className="rounded-md border border-primary/30 bg-primary/5 p-3 text-sm"><p className="font-medium text-primary">Черновик восстановлен</p><p className="text-xs text-muted-foreground mt-0.5">Ваши несохранённые изменения сохранились на этом устройстве.</p></div>}
 
       <Card><CardContent className="p-4 space-y-3">
         <h2 className="font-semibold">Клиент</h2>
@@ -211,6 +279,30 @@ export default function EditOrderPage({ params }: { params: { id: string } }) {
           {saving ? "Сохранение…" : dirty ? "Сохранить" : "Сохранено"}
         </Button>
       </div>
+
+      {showLeaveConfirm && (
+        <div className="fixed inset-0 z-[190] flex items-end sm:items-center justify-center sm:p-4">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowLeaveConfirm(false)} />
+          <div className="relative w-full sm:max-w-md rounded-t-lg sm:rounded-lg border border-border bg-card p-5 shadow-2xl">
+            <h2 className="text-lg font-bold">Изменения ещё не сохранены</h2>
+            <p className="text-sm text-muted-foreground mt-2">Если выйти, введённые данные останутся черновиком на этом устройстве. Вы сможете вернуться и продолжить.</p>
+            <div className="grid grid-cols-2 gap-3 mt-5">
+              <Button variant="outline" onClick={leaveWithDraft}>Выйти</Button>
+              <Button onClick={() => setShowLeaveConfirm(false)}>Остаться</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {saving && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-background/85 backdrop-blur-sm p-6">
+          <div className="w-full max-w-sm rounded-lg border border-border bg-card p-6 text-center shadow-2xl">
+            <Loader2 className="h-9 w-9 mx-auto animate-spin text-primary" />
+            <p className="font-semibold mt-4">{savingLabel}</p>
+            <p className="text-sm text-muted-foreground mt-2">Не закрывайте страницу. Обычно это занимает несколько секунд.</p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

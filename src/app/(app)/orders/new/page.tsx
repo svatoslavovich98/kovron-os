@@ -651,7 +651,7 @@ export default function NewOrderPage() {
                     <span className="font-semibold">{formatCurrency(totalCosts)}</span>
                   </div>
                   <div className="flex justify-between text-sm">
-                    <span>Плановая прибыль</span>
+                    <span>Ожидаемая прибыль после полной оплаты</span>
                     <span className={`font-bold ${plannedProfit >= 0 ? "text-income" : "text-expense"}`}>
                       {formatCurrency(plannedProfit)}
                     </span>
