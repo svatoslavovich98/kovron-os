@@ -56,7 +56,10 @@ function withTimeout<T>(promise: Promise<T>, milliseconds: number, stage: string
 
 export default function NewOrderPage() {
   const { user } = useAuth();
-  const { users, clients, cars, orders, createOrder, createClient, createCar } = useData();
+  const {
+    users, clients, cars, orders, accounts, incomeCategories,
+    createOrder, createClient, createCar, createTransaction,
+  } = useData();
   const router = useRouter();
   const [step, setStep] = useState(0);
   const [clientSearch, setClientSearch] = useState("");
@@ -73,6 +76,7 @@ export default function NewOrderPage() {
   const clientDraftId = useRef(crypto.randomUUID());
   const carDraftId = useRef(crypto.randomUUID());
   const orderDraftId = useRef(crypto.randomUUID());
+  const paymentDraftId = useRef(crypto.randomUUID());
 
   useEffect(() => {
     const warn = (event: BeforeUnloadEvent) => {
@@ -116,6 +120,15 @@ export default function NewOrderPage() {
     layoutPhotos: [] as string[],
     salonPhotos: [] as string[],
   });
+
+  useEffect(() => {
+    if (form.prepaymentAccount || !accounts.length) return;
+    const defaultAccount = accounts.find(item => item.active && item.type === "cash")
+      || accounts.find(item => item.active);
+    if (defaultAccount) {
+      setForm(prev => ({ ...prev, prepaymentAccount: defaultAccount.id }));
+    }
+  }, [accounts, form.prepaymentAccount]);
 
   const updateForm = (field: string, value: string | string[]) => {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -227,7 +240,7 @@ export default function NewOrderPage() {
     try {
       const saved = window.localStorage.getItem(`kovron-new-order-draft-${user.id}`);
       if (!saved) return;
-      const draft = JSON.parse(saved) as { form?: Partial<typeof form>; clientId?: string; step?: number; orderNumber?: string; clientDraftId?: string; carDraftId?: string; orderDraftId?: string };
+      const draft = JSON.parse(saved) as { form?: Partial<typeof form>; clientId?: string; step?: number; orderNumber?: string; clientDraftId?: string; carDraftId?: string; orderDraftId?: string; paymentDraftId?: string };
       setForm(prev => ({ ...prev, ...(draft.form || {}) }));
       const draftClient = clients.find(client => client.id === draft.clientId);
       if (draftClient) setExistingClient(draftClient);
@@ -237,6 +250,7 @@ export default function NewOrderPage() {
       if (draft.clientDraftId) clientDraftId.current = draft.clientDraftId;
       if (draft.carDraftId) carDraftId.current = draft.carDraftId;
       if (draft.orderDraftId) orderDraftId.current = draft.orderDraftId;
+      if (draft.paymentDraftId) paymentDraftId.current = draft.paymentDraftId;
       setDirty(true);
       setDraftRestored(true);
     } catch {
@@ -251,6 +265,7 @@ export default function NewOrderPage() {
         window.localStorage.setItem(`kovron-new-order-draft-${user.id}`, JSON.stringify({
           form, clientId: existingClient?.id, step, orderNumber: orderNumber.current,
           clientDraftId: clientDraftId.current, carDraftId: carDraftId.current, orderDraftId: orderDraftId.current,
+          paymentDraftId: paymentDraftId.current,
           updatedAt: new Date().toISOString(),
         }));
       } catch {
@@ -298,6 +313,11 @@ export default function NewOrderPage() {
     if (prepayment < 0 || prepayment > totalPrice) {
       setStep(6);
       setSaveError("Предоплата не может быть отрицательной или больше стоимости заказа.");
+      return;
+    }
+    if (prepayment > 0 && !form.prepaymentAccount) {
+      setStep(6);
+      setSaveError("Выберите кассу или счёт, куда поступила оплата.");
       return;
     }
     setSaving(true);
@@ -370,6 +390,30 @@ export default function NewOrderPage() {
       }), 60000, "Создание заказа");
 
       if (order) {
+        if (prepayment > 0) {
+          const paymentAccount = accounts.find(item => item.id === form.prepaymentAccount);
+          const paymentMethod = paymentAccount?.type === "cash" ? "Наличные"
+            : paymentAccount?.type === "card" ? "Карта" : "Перевод";
+          const paymentCategory = incomeCategories.find(item => item.canLinkOrder)
+            || incomeCategories.find(item => item.name.toLocaleLowerCase("ru-RU").includes("оплат"))
+            || incomeCategories[0];
+          setSavingStage("Регистрируем оплату…");
+          const payment = await withTimeout(createTransaction({
+            id: paymentDraftId.current,
+            type: "income",
+            amount: prepayment,
+            categoryId: paymentCategory?.id,
+            accountId: form.prepaymentAccount,
+            orderId: order.id,
+            clientId,
+            paymentType: "prepayment",
+            description: `${paymentMethod} · Оплата при создании заказа`,
+            userId: user?.id,
+            userName: user?.name,
+            createdAt: new Date().toISOString(),
+          }), 60000, "Сохранение оплаты");
+          if (!payment) throw new Error("Не удалось зарегистрировать оплату");
+        }
         if (user) window.localStorage.removeItem(`kovron-new-order-draft-${user.id}`);
         setDirty(false);
         setDraftRestored(false);
@@ -693,9 +737,41 @@ export default function NewOrderPage() {
                   <Input type="number" placeholder="12000" value={form.totalPrice} onChange={(e) => updateForm("totalPrice", e.target.value)} />
                 </div>
                 <div>
-                  <label className="text-sm text-muted-foreground mb-1 block">Предоплата</label>
-                  <Input type="number" placeholder="5000" value={form.prepayment} onChange={(e) => updateForm("prepayment", e.target.value)} />
+                  <div className="mb-1 flex items-center justify-between gap-3">
+                    <label className="text-sm text-muted-foreground">Оплачено сейчас</label>
+                    {totalPrice > 0 && (
+                      <button type="button" className="text-xs font-medium text-primary" onClick={() => updateForm("prepayment", String(totalPrice))}>
+                        Вся сумма
+                      </button>
+                    )}
+                  </div>
+                  <Input type="number" placeholder="0" value={form.prepayment} onChange={(e) => updateForm("prepayment", e.target.value)} />
+                  <p className="mt-1 text-xs text-muted-foreground">Оставьте 0, если клиент пока не платил.</p>
                 </div>
+                {prepayment > 0 && (
+                  <div className="rounded-md border border-primary/25 bg-primary/5 p-3">
+                    <label className="mb-2 block text-sm font-medium">Куда поступили деньги</label>
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                      {accounts.filter(item => item.active).map(account => (
+                        <button
+                          key={account.id}
+                          type="button"
+                          onClick={() => updateForm("prepaymentAccount", account.id)}
+                          className={cn(
+                            "rounded-md border p-3 text-left transition-colors",
+                            form.prepaymentAccount === account.id
+                              ? "border-primary bg-primary/10"
+                              : "border-border bg-card hover:border-primary/40",
+                          )}
+                        >
+                          <span className="block text-sm font-medium">{account.name}</span>
+                          <span className="mt-0.5 block text-xs text-muted-foreground">Баланс {formatCurrency(account.balance)}</span>
+                        </button>
+                      ))}
+                    </div>
+                    <p className="mt-2 text-xs text-muted-foreground">После создания заказа оплата сразу появится в балансе и истории финансов.</p>
+                  </div>
+                )}
                 <div className="p-3 rounded-md bg-background">
                   <div className="flex justify-between text-sm">
                     <span className="text-muted-foreground">Осталось получить</span>
