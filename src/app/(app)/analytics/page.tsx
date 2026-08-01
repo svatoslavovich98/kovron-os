@@ -170,7 +170,7 @@ export default function AnalyticsPage() {
           { label: "Расходы", value: formatCurrency(totalExpenses) },
           { label: "Средний чек", value: formatCurrency(avgCheck) },
           { label: "Долг клиентов", value: formatCurrency(clientDebt) },
-          { label: "Ожидаемая прибыль", value: formatCurrency(totalPlannedProfit) },
+          { label: "Плановая прибыль", value: formatCurrency(totalPlannedProfit) },
           { label: "Факт. прибыль", value: formatCurrency(totalReceived - totalExpenses) },
         ].map((item, i) => (
           <Card key={i}>

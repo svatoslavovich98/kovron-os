@@ -217,7 +217,7 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
               <span>{formatCurrency(order.materialCost)}</span>
             </div>
             <div className="flex justify-between font-semibold">
-              <span>Ожидаемая прибыль после полной оплаты</span>
+              <span>Плановая прибыль после полной оплаты</span>
               <span className={order.plannedProfit >= 0 ? "text-income" : "text-expense"}>
                 {formatCurrency(order.plannedProfit)}
               </span>
