@@ -591,7 +591,7 @@ function useSupabaseData(): AppData {
     const sb = getSupabase();
     if (!sb) return null;
 
-    const num = `${new Date().getDate().toString().padStart(2,"0")}${(new Date().getMonth()+1).toString().padStart(2,"0")}-${Math.floor(Math.random()*900)+100}`;
+    const num = o.number?.trim() || `${new Date().getDate().toString().padStart(2,"0")}${(new Date().getMonth()+1).toString().padStart(2,"0")}-${Math.floor(Math.random()*900)+100}`;
     const initialStatus: OrderStatus = "new";
 
     const { data: created, error } = await sb.from("orders").insert({
@@ -623,7 +623,15 @@ function useSupabaseData(): AppData {
       created_by: user?.id || null,
     }).select().single();
 
-    if (error || !created) { console.error("Create order error:", error); return null; }
+    if (error) {
+      if (error.code === "23505") {
+        const { data: existing } = await sb.from("orders").select("*").eq("number", num).maybeSingle();
+        if (existing) return mapOrderRow({ ...existing, order_status_history: [] });
+      }
+      console.error("Create order error:", error);
+      throw new Error(error.message || "Не удалось создать заказ");
+    }
+    if (!created) throw new Error("Сервер не вернул созданный заказ");
     const order: Order = {
       ...o,
       id: created.id,
@@ -779,7 +787,8 @@ function useSupabaseData(): AppData {
       messenger: c.messenger, comment: c.comment, source: c.source,
     }).select().single();
 
-    if (error || !created) { console.error("Create client error:", error); return null; }
+    if (error) { console.error("Create client error:", error); throw new Error(error.message || "Не удалось создать клиента"); }
+    if (!created) throw new Error("Сервер не вернул созданного клиента");
     const client = { ...c, id: created.id, createdAt: created.created_at } as Client;
     setData(prev => ({ ...prev, clients: [client, ...prev.clients] }));
     return client;
@@ -864,7 +873,8 @@ function useSupabaseData(): AppData {
       plate_number: c.plateNumber, comment: c.comment,
     }).select().single();
 
-    if (error || !created) { console.error("Create car error:", error); return null; }
+    if (error) { console.error("Create car error:", error); throw new Error(error.message || "Не удалось создать автомобиль"); }
+    if (!created) throw new Error("Сервер не вернул созданный автомобиль");
     const car = { ...c, id: created.id } as Car;
     setData(prev => ({ ...prev, cars: [car, ...prev.cars] }));
     return car;

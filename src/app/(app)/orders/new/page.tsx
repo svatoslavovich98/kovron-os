@@ -34,6 +34,26 @@ function normalizePhone(value: string) {
   return digits.length === 11 && (digits.startsWith("7") || digits.startsWith("8")) ? digits.slice(1) : digits;
 }
 
+function createDraftOrderNumber() {
+  const now = new Date();
+  const time = `${now.getHours().toString().padStart(2, "0")}${now.getMinutes().toString().padStart(2, "0")}${now.getSeconds().toString().padStart(2, "0")}`;
+  const suffix = Math.floor(Math.random() * 90 + 10);
+  return `${now.getDate().toString().padStart(2, "0")}${(now.getMonth() + 1).toString().padStart(2, "0")}-${time}-${suffix}`;
+}
+
+function withTimeout<T>(promise: Promise<T>, milliseconds: number, stage: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = window.setTimeout(() => reject(new Error(`${stage} заняло слишком много времени`)), milliseconds);
+    promise.then(value => {
+      window.clearTimeout(timer);
+      resolve(value);
+    }, error => {
+      window.clearTimeout(timer);
+      reject(error);
+    });
+  });
+}
+
 export default function NewOrderPage() {
   const { user } = useAuth();
   const { users, clients, cars, orders, createOrder, createClient, createCar } = useData();
@@ -43,19 +63,23 @@ export default function NewOrderPage() {
   const [creatingNewClient, setCreatingNewClient] = useState(false);
   const [existingClient, setExistingClient] = useState<Client | null>(null);
   const [saving, setSaving] = useState(false);
+  const [savingStage, setSavingStage] = useState("Подготавливаем заказ…");
   const [dirty, setDirty] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [draftRestored, setDraftRestored] = useState(false);
   const prefillApplied = useRef(false);
+  const newDraftLoaded = useRef(false);
+  const orderNumber = useRef(createDraftOrderNumber());
 
   useEffect(() => {
     const warn = (event: BeforeUnloadEvent) => {
-      if (!dirty) return;
+      if (!dirty && !saving) return;
       event.preventDefault();
       event.returnValue = "";
     };
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
-  }, [dirty]);
+  }, [dirty, saving]);
 
   const [form, setForm] = useState({
     clientName: "",
@@ -190,6 +214,42 @@ export default function NewOrderPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clients, cars, orders]);
 
+  useEffect(() => {
+    if (newDraftLoaded.current || !user || !clients.length) return;
+    newDraftLoaded.current = true;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("clientId") || params.get("carId") || params.get("repeatOrderId")) return;
+    try {
+      const saved = window.localStorage.getItem(`kovron-new-order-draft-${user.id}`);
+      if (!saved) return;
+      const draft = JSON.parse(saved) as { form?: Partial<typeof form>; clientId?: string; step?: number; orderNumber?: string };
+      setForm(prev => ({ ...prev, ...(draft.form || {}) }));
+      const draftClient = clients.find(client => client.id === draft.clientId);
+      if (draftClient) setExistingClient(draftClient);
+      else setCreatingNewClient(true);
+      if (typeof draft.step === "number") setStep(Math.min(Math.max(draft.step, 0), steps.length - 1));
+      if (draft.orderNumber) orderNumber.current = draft.orderNumber;
+      setDirty(true);
+      setDraftRestored(true);
+    } catch {
+      window.localStorage.removeItem(`kovron-new-order-draft-${user.id}`);
+    }
+  }, [clients, user]);
+
+  useEffect(() => {
+    if (!dirty || !user) return;
+    const timer = window.setTimeout(() => {
+      try {
+        window.localStorage.setItem(`kovron-new-order-draft-${user.id}`, JSON.stringify({
+          form, clientId: existingClient?.id, step, orderNumber: orderNumber.current, updatedAt: new Date().toISOString(),
+        }));
+      } catch {
+        // The order can still be saved to the server if local draft storage is full.
+      }
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [dirty, existingClient?.id, form, step, user]);
+
   const totalPrice = parseFloat(form.totalPrice) || 0;
   const prepayment = parseFloat(form.prepayment) || 0;
   const seamstressPayment = parseFloat(form.seamstressPayment) || 0;
@@ -231,26 +291,33 @@ export default function NewOrderPage() {
       return;
     }
     setSaving(true);
+    setSavingStage("Подготавливаем заказ…");
     setSaveError(null);
     try {
       // Create client if new
       let clientId = existingClient?.id;
       if (!clientId && form.clientName && form.clientPhone) {
-        const newClient = await createClient({
+        setSavingStage("Сохраняем клиента…");
+        const newClient = await withTimeout(createClient({
           name: form.clientName,
           phone: form.clientPhone,
           phone2: form.clientPhone2 || undefined,
           messenger: form.clientMessenger || undefined,
           comment: form.clientComment || undefined,
           source: form.clientSource || undefined,
-        });
+        }), 20000, "Сохранение клиента");
         clientId = newClient?.id;
+        if (newClient) {
+          setExistingClient(newClient);
+          setCreatingNewClient(false);
+        }
       }
 
       // Create car
       let carId: string | undefined = form.existingCarId || undefined;
       if (!carId && clientId && form.carBrand && form.carModel) {
-        const newCar = await createCar({
+        setSavingStage("Сохраняем автомобиль…");
+        const newCar = await withTimeout(createCar({
           clientId,
           brand: form.carBrand,
           model: form.carModel,
@@ -259,17 +326,18 @@ export default function NewOrderPage() {
           body: form.carBody || undefined,
           plateNumber: form.carPlateNumber || undefined,
           comment: form.carComment || undefined,
-        });
+        }), 20000, "Сохранение автомобиля");
         carId = newCar?.id;
+        if (newCar) setForm(prev => ({ ...prev, existingCarId: newCar.id }));
       }
 
       if (!clientId || !carId) {
-        setSaveError("Не удалось создать клиента или автомобиль. Проверьте обязательные поля.");
-        setSaving(false);
-        return;
+        throw new Error("Не удалось определить клиента или автомобиль");
       }
 
-      const order = await createOrder({
+      setSavingStage("Создаём заказ…");
+      const order = await withTimeout(createOrder({
+        number: orderNumber.current,
         createdById: user?.id,
         clientId,
         carId,
@@ -286,17 +354,26 @@ export default function NewOrderPage() {
         chineseCost: chineseCost,
         materialCost: materialCost,
         otherCosts: otherCosts,
-      });
+      }), 25000, "Создание заказа");
 
       if (order) {
+        if (user) window.localStorage.removeItem(`kovron-new-order-draft-${user.id}`);
         setDirty(false);
+        setDraftRestored(false);
         router.push("/orders");
       } else {
         setSaveError("Не удалось создать заказ. Проверьте соединение и повторите попытку.");
       }
     } catch (err) {
       console.error("Save error:", err);
-      setSaveError("Произошла ошибка при сохранении. Попробуйте ещё раз.");
+      const details = err instanceof Error ? err.message : "";
+      if (/row.level|permission|not authorized|jwt/i.test(details)) {
+        setSaveError("У текущего пользователя нет прав на создание заказа. Проверьте его роль в админке.");
+      } else if (/слишком много времени/i.test(details)) {
+        setSaveError(`${details}. Черновик сохранён — проверьте интернет и повторите попытку.`);
+      } else {
+        setSaveError(`Не удалось сохранить заказ. Черновик сохранён.${details ? ` Причина: ${details}` : ""}`);
+      }
     } finally {
       setSaving(false);
     }
@@ -664,6 +741,7 @@ export default function NewOrderPage() {
       </Card>
 
       {/* Navigation buttons */}
+      {draftRestored && <div className="rounded-md border border-primary/30 bg-primary/5 p-3 text-sm"><p className="font-medium text-primary">Черновик заказа восстановлен</p><p className="text-xs text-muted-foreground mt-0.5">Можно продолжить с того места, где сохранение прервалось.</p></div>}
       {saveError && <div className="rounded-md border border-expense/30 bg-expense/10 p-3 text-sm text-expense">{saveError}</div>}
       <div className="flex gap-3">
         {step > 0 && (
@@ -683,6 +761,16 @@ export default function NewOrderPage() {
           </Button>
         )}
       </div>
+
+      {saving && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-background/85 backdrop-blur-sm p-6">
+          <div className="w-full max-w-sm rounded-lg border border-border bg-card p-6 text-center shadow-2xl">
+            <div className="h-9 w-9 mx-auto rounded-full border-4 border-primary/25 border-t-primary animate-spin" />
+            <p className="font-semibold mt-4">{savingStage}</p>
+            <p className="text-sm text-muted-foreground mt-2">Не закрывайте страницу. При ошибке черновик останется сохранённым.</p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
