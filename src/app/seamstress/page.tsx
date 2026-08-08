@@ -12,7 +12,7 @@ import { CompleteWorkDialog } from "@/components/complete-work-dialog";
 import { OrderPhotoGallery } from "@/components/order-photo-gallery";
 import { isFinishedPhoto } from "@/lib/order-media";
 import {
-  Play, Pause, RotateCcw, CheckCircle2, Calendar,
+  Play, CheckCircle2, Calendar,
   Clock, Wallet, ChevronDown, Loader2,
 } from "lucide-react";
 
@@ -27,7 +27,7 @@ export default function SeamstressCabinet() {
 
   const { orders, cars, statuses, updateOrderStatus } = useData();
 
-  const moveOrder = async (orderId: string, status: "in_progress" | "paused") => {
+  const moveOrder = async (orderId: string, status: "in_progress") => {
     setWorkingId(orderId);
     await updateOrderStatus(orderId, status);
     setWorkingId(null);
@@ -54,7 +54,7 @@ export default function SeamstressCabinet() {
 
   const filteredOrders = myOrders.filter((o) => {
     if (activeTab === "assigned") return o.status === "new" || o.status === "assigned" || o.status === "pending_production";
-    if (activeTab === "in_progress") return o.status === "in_progress" || o.status === "paused";
+    if (activeTab === "in_progress") return o.status === "in_progress";
     return o.status === "ready" || o.status === "pending_delivery";
   });
 
@@ -226,21 +226,9 @@ export default function SeamstressCabinet() {
                           </Button>
                         )}
                         {order.status === "in_progress" && (
-                          <>
-                            <Button variant="outline" className="w-full h-14 text-base" disabled={workingId === order.id} onClick={() => void moveOrder(order.id, "paused")}>
-                              <Pause className="h-5 w-5 mr-2" />
-                              Приостановить
-                            </Button>
-                            <Button className="w-full h-14 text-base bg-income hover:bg-income/90 text-white" onClick={() => setCompletingOrderId(order.id)}>
-                              <CheckCircle2 className="h-5 w-5 mr-2" />
-                              Готово
-                            </Button>
-                          </>
-                        )}
-                        {order.status === "paused" && (
-                          <Button className="w-full h-14 text-base" disabled={workingId === order.id} onClick={() => void moveOrder(order.id, "in_progress")}>
-                            <RotateCcw className="h-5 w-5 mr-2" />
-                            Продолжить
+                          <Button className="w-full h-14 text-base bg-income hover:bg-income/90 text-white" onClick={() => setCompletingOrderId(order.id)}>
+                            <CheckCircle2 className="h-5 w-5 mr-2" />
+                            Готово
                           </Button>
                         )}
                       </div>

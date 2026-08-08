@@ -12,6 +12,8 @@ import { kitLabels } from "@/lib/demo-data";
 import { OrderPhotoGallery } from "@/components/order-photo-gallery";
 import { isFinishedPhoto } from "@/lib/order-media";
 import { ReceivePaymentDialog } from "@/components/receive-payment-dialog";
+import { PayContractorDialog } from "@/components/pay-contractor-dialog";
+import { LayoutImageViewer } from "@/components/layout-image-viewer";
 import type { OrderStatus } from "@/lib/types";
 import {
   ArrowLeft, Phone, MessageCircle, Calendar, Clock,
@@ -124,7 +126,12 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
                 <Badge key={kit} variant="outline">{kitLabels[kit] || kit}</Badge>
               ))}
             </div>
-            <div className="grid grid-cols-2 gap-2 pt-3">
+            {/* Раскладка лекал — открывается сразу, без поиска по фотографиям */}
+            <div className="pt-3">
+              <LayoutImageViewer url={order.layoutImage} orderNumber={order.number} />
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 pt-1">
               {client && <Link href={`/clients/${client.id}`}><Button variant="outline" size="sm" className="w-full"><User className="h-3.5 w-3.5 mr-1.5" />История клиента</Button></Link>}
               <Link href={`/orders/new?repeatOrderId=${order.id}`}><Button variant="outline" size="sm" className="w-full"><CopyPlus className="h-3.5 w-3.5 mr-1.5" />Повторить заказ</Button></Link>
             </div>
@@ -228,6 +235,9 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
           {order.remaining > 0 && (
             <ReceivePaymentDialog order={order} />
           )}
+
+          {/* Выплаты подрядчикам — только вручную, автоматом ничего не списывается */}
+          <PayContractorDialog order={order} />
         </CardContent>
       </Card>
 

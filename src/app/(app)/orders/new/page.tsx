@@ -58,7 +58,7 @@ export default function NewOrderPage() {
   const { user } = useAuth();
   const {
     users, clients, cars, orders, accounts, incomeCategories,
-    createOrder, createClient, createCar, createTransaction,
+    createOrder, createOrderWithPayment, createFullOrder, createClient, createCar, createTransaction,
   } = useData();
   const router = useRouter();
   const [step, setStep] = useState(0);
@@ -66,7 +66,8 @@ export default function NewOrderPage() {
   const [creatingNewClient, setCreatingNewClient] = useState(false);
   const [existingClient, setExistingClient] = useState<Client | null>(null);
   const [saving, setSaving] = useState(false);
-  const [savingStage, setSavingStage] = useState("Подготавливаем заказ…");
+  const [savingStage, setSavingStage] = useState("Сохраняем заказ…");
+  const [savedNumber, setSavedNumber] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [draftRestored, setDraftRestored] = useState(false);
@@ -117,6 +118,7 @@ export default function NewOrderPage() {
     chineseCost: "",
     materialCost: "",
     otherCosts: "",
+    carViewPhotos: [] as string[],
     layoutPhotos: [] as string[],
     salonPhotos: [] as string[],
   });
@@ -321,117 +323,79 @@ export default function NewOrderPage() {
       return;
     }
     setSaving(true);
-    setSavingStage("Подготавливаем заказ…");
+    setSavingStage("Сохраняем заказ…");
     setSaveError(null);
     try {
-      // Create client if new
-      let clientId = existingClient?.id;
-      if (!clientId && form.clientName && form.clientPhone) {
-        setSavingStage("Сохраняем клиента…");
-        const newClient = await withTimeout(createClient({
-          id: clientDraftId.current,
-          name: form.clientName,
-          phone: form.clientPhone,
+      const paymentAccount = accounts.find(item => item.id === form.prepaymentAccount);
+      const paymentMethod = paymentAccount?.type === "cash" ? "Наличные"
+        : paymentAccount?.type === "card" ? "Карта" : "Перевод";
+
+      // Один запрос к серверу: клиент, автомобиль, заказ и предоплата
+      // сохраняются вместе. Повторное нажатие дубль не создаёт —
+      // сервер узнаёт заказ по идентификатору черновика.
+      const result = await withTimeout(createFullOrder({
+        client: {
+          id: existingClient?.id || clientDraftId.current,
+          name: existingClient?.name || form.clientName.trim(),
+          phone: existingClient?.phone || form.clientPhone.trim(),
           phone2: form.clientPhone2 || undefined,
           messenger: form.clientMessenger || undefined,
           comment: form.clientComment || undefined,
           source: form.clientSource || undefined,
-        }), 60000, "Сохранение клиента");
-        clientId = newClient?.id;
-        if (newClient) {
-          setExistingClient(newClient);
-          setCreatingNewClient(false);
-        }
-      }
-
-      // Create car
-      let carId: string | undefined = form.existingCarId || undefined;
-      if (!carId && clientId && form.carBrand && form.carModel) {
-        setSavingStage("Сохраняем автомобиль…");
-        const newCar = await withTimeout(createCar({
-          id: carDraftId.current,
-          clientId,
-          brand: form.carBrand,
-          model: form.carModel,
+        },
+        car: {
+          id: form.existingCarId || carDraftId.current,
+          brand: form.carBrand.trim(),
+          model: form.carModel.trim(),
           generation: form.carGeneration || undefined,
           year: form.carYear ? parseInt(form.carYear) : undefined,
           body: form.carBody || undefined,
           plateNumber: form.carPlateNumber || undefined,
           comment: form.carComment || undefined,
-        }), 60000, "Сохранение автомобиля");
-        carId = newCar?.id;
-        if (newCar) setForm(prev => ({ ...prev, existingCarId: newCar.id }));
-      }
+        },
+        order: {
+          id: orderDraftId.current,
+          number: orderNumber.current,
+          kitTypes: form.kitTypes as any,
+          layoutImage: form.layoutPhotos[0],
+          photos: [...form.carViewPhotos, ...form.salonPhotos],
+          seamstressComment: form.seamstressComment || undefined,
+          assigneeId: form.assigneeId || undefined,
+          priority: form.priority as any,
+          desiredDate: form.desiredDate || undefined,
+          totalPrice,
+          seamstressPayment,
+          chineseCost,
+          materialCost,
+          otherCosts,
+        },
+        payment: prepayment > 0
+          ? { amount: prepayment, accountId: form.prepaymentAccount, method: paymentMethod }
+          : undefined,
+      }), 30000, "Сохранение заказа");
 
-      if (!clientId || !carId) {
-        throw new Error("Не удалось определить клиента или автомобиль");
-      }
-
-      setSavingStage("Создаём заказ…");
-      const order = await withTimeout(createOrder({
-        id: orderDraftId.current,
-        number: orderNumber.current,
-        createdById: user?.id,
-        clientId,
-        carId,
-        kitTypes: form.kitTypes as any,
-        layoutImage: form.layoutPhotos[0],
-        photos: form.salonPhotos,
-        seamstressComment: form.seamstressComment || undefined,
-        assigneeId: form.assigneeId || undefined,
-        priority: form.priority as any,
-        desiredDate: form.desiredDate || undefined,
-        totalPrice: totalPrice,
-        prepayment: prepayment,
-        seamstressPayment: seamstressPayment,
-        chineseCost: chineseCost,
-        materialCost: materialCost,
-        otherCosts: otherCosts,
-      }), 60000, "Создание заказа");
-
-      if (order) {
-        if (prepayment > 0) {
-          const paymentAccount = accounts.find(item => item.id === form.prepaymentAccount);
-          const paymentMethod = paymentAccount?.type === "cash" ? "Наличные"
-            : paymentAccount?.type === "card" ? "Карта" : "Перевод";
-          const paymentCategory = incomeCategories.find(item => item.canLinkOrder)
-            || incomeCategories.find(item => item.name.toLocaleLowerCase("ru-RU").includes("оплат"))
-            || incomeCategories[0];
-          setSavingStage("Регистрируем оплату…");
-          const payment = await withTimeout(createTransaction({
-            id: paymentDraftId.current,
-            type: "income",
-            amount: prepayment,
-            categoryId: paymentCategory?.id,
-            accountId: form.prepaymentAccount,
-            orderId: order.id,
-            clientId,
-            paymentType: "prepayment",
-            description: `${paymentMethod} · Оплата при создании заказа`,
-            userId: user?.id,
-            userName: user?.name,
-            createdAt: new Date().toISOString(),
-          }), 60000, "Сохранение оплаты");
-          if (!payment) throw new Error("Не удалось зарегистрировать оплату");
-        }
+      if (result) {
+        setSavingStage("Заказ сохранён");
+        setSavedNumber(result.number);
         if (user) window.localStorage.removeItem(`kovron-new-order-draft-${user.id}`);
         setDirty(false);
         setDraftRestored(false);
-        router.push("/orders");
-      } else {
-        setSaveError("Не удалось создать заказ. Проверьте соединение и повторите попытку.");
+        // Короткая пауза, чтобы человек увидел подтверждение
+        setTimeout(() => router.push("/orders"), 900);
+        return;
       }
+      setSaveError("Не удалось создать заказ. Проверьте соединение и повторите попытку.");
+      setSaving(false);
     } catch (err) {
       console.error("Save error:", err);
       const details = err instanceof Error ? err.message : "";
       if (/row.level|permission|not authorized|jwt/i.test(details)) {
-        setSaveError("У текущего пользователя нет прав на создание заказа. Проверьте его роль в админке.");
+        setSaveError("У этого сотрудника нет прав на создание заказа. Проверьте роль в админке.");
       } else if (/слишком много времени/i.test(details)) {
-        setSaveError(`${details}. Черновик сохранён — проверьте интернет и повторите попытку.`);
+        setSaveError("Сервер не ответил вовремя. Черновик сохранён — проверьте интернет и нажмите «Создать заказ» ещё раз, дубль не появится.");
       } else {
         setSaveError(`Не удалось сохранить заказ. Черновик сохранён.${details ? ` Причина: ${details}` : ""}`);
       }
-    } finally {
       setSaving(false);
     }
   };
@@ -572,31 +536,31 @@ export default function NewOrderPage() {
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="text-sm text-muted-foreground mb-1 block">Марка</label>
-                    <Input placeholder="Toyota" value={form.carBrand} onChange={(e) => updateForm("carBrand", e.target.value)} />
+                    <Input placeholder="" value={form.carBrand} onChange={(e) => updateForm("carBrand", e.target.value)} />
                   </div>
                   <div>
                     <label className="text-sm text-muted-foreground mb-1 block">Модель</label>
-                    <Input placeholder="Camry" value={form.carModel} onChange={(e) => updateForm("carModel", e.target.value)} />
+                    <Input placeholder="" value={form.carModel} onChange={(e) => updateForm("carModel", e.target.value)} />
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="text-sm text-muted-foreground mb-1 block">Поколение</label>
-                    <Input placeholder="XV70" value={form.carGeneration} onChange={(e) => updateForm("carGeneration", e.target.value)} />
+                    <Input placeholder="" value={form.carGeneration} onChange={(e) => updateForm("carGeneration", e.target.value)} />
                   </div>
                   <div>
                     <label className="text-sm text-muted-foreground mb-1 block">Год выпуска</label>
-                    <Input placeholder="2021" type="number" value={form.carYear} onChange={(e) => updateForm("carYear", e.target.value)} />
+                    <Input placeholder="" type="number" value={form.carYear} onChange={(e) => updateForm("carYear", e.target.value)} />
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="text-sm text-muted-foreground mb-1 block">Кузов</label>
-                    <Input placeholder="Седан" value={form.carBody} onChange={(e) => updateForm("carBody", e.target.value)} />
+                    <Input placeholder="" value={form.carBody} onChange={(e) => updateForm("carBody", e.target.value)} />
                   </div>
                   <div>
                     <label className="text-sm text-muted-foreground mb-1 block">Гос. номер</label>
-                    <Input placeholder="А777АА22" value={form.carPlateNumber} onChange={(e) => updateForm("carPlateNumber", e.target.value)} />
+                    <Input placeholder="" value={form.carPlateNumber} onChange={(e) => updateForm("carPlateNumber", e.target.value)} />
                   </div>
                 </div>
                 </>}
@@ -635,20 +599,28 @@ export default function NewOrderPage() {
               </p>
               <div className="space-y-6">
                 <OrderPhotoPicker
-                  label="Раскладка"
-                  hint="Можно добавить сейчас или позже при редактировании заказа"
-                  kind="layout"
-                  urls={form.layoutPhotos}
-                  onChange={(urls) => updateForm("layoutPhotos", urls)}
+                  label="Вид машины"
+                  hint="Одна фотография — она же будет обложкой заказа в списке"
+                  kind="carview"
+                  urls={form.carViewPhotos}
+                  onChange={(urls) => updateForm("carViewPhotos", urls)}
                   max={1}
                 />
                 <OrderPhotoPicker
-                  label="Салон автомобиля"
-                  hint="До четырёх фотографий; можно добавить позже"
+                  label="Пол салона"
+                  hint="До четырёх фотографий"
                   kind="salon"
                   urls={form.salonPhotos}
                   onChange={(urls) => updateForm("salonPhotos", urls)}
                   max={4}
+                />
+                <OrderPhotoPicker
+                  label="Раскладка лекал"
+                  hint="Одна картинка"
+                  kind="layout"
+                  urls={form.layoutPhotos}
+                  onChange={(urls) => updateForm("layoutPhotos", urls)}
+                  max={1}
                 />
               </div>
             </>
@@ -734,11 +706,11 @@ export default function NewOrderPage() {
               <div className="space-y-3">
                 <div>
                   <label className="text-sm text-muted-foreground mb-1 block">Стоимость заказа</label>
-                  <Input type="number" placeholder="12000" value={form.totalPrice} onChange={(e) => updateForm("totalPrice", e.target.value)} />
+                  <Input type="number" inputMode="numeric" placeholder="" value={form.totalPrice} onChange={(e) => updateForm("totalPrice", e.target.value)} />
                 </div>
                 <div>
                   <div className="mb-1 flex items-center justify-between gap-3">
-                    <label className="text-sm text-muted-foreground">Оплачено сейчас</label>
+                    <label className="text-sm font-medium">Предоплата</label>
                     {totalPrice > 0 && (
                       <button type="button" className="text-xs font-medium text-primary" onClick={() => updateForm("prepayment", String(totalPrice))}>
                         Вся сумма
@@ -746,7 +718,11 @@ export default function NewOrderPage() {
                     )}
                   </div>
                   <Input type="number" placeholder="0" value={form.prepayment} onChange={(e) => updateForm("prepayment", e.target.value)} />
-                  <p className="mt-1 text-xs text-muted-foreground">Оставьте 0, если клиент пока не платил.</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Сколько клиент отдал прямо сейчас — эта сумма сразу попадёт на счёт.
+                    Остаток примете позже кнопкой «Получить оплату» в карточке заказа.
+                    Не платил — оставьте пустым.
+                  </p>
                 </div>
                 {prepayment > 0 && (
                   <div className="rounded-md border border-primary/25 bg-primary/5 p-3">
@@ -787,7 +763,8 @@ export default function NewOrderPage() {
                   </label>
                   <Input
                     type="number"
-                    placeholder="1200"
+                    inputMode="numeric"
+                    placeholder=""
                     value={form.seamstressPayment}
                     onChange={(e) => updateForm("seamstressPayment", e.target.value)}
                     className={form.assigneeId && !form.seamstressPayment ? "border-expense" : ""}
@@ -798,7 +775,8 @@ export default function NewOrderPage() {
                   <label className="text-sm text-muted-foreground mb-1 block">Оплата китайцам</label>
                   <Input
                     type="number"
-                    placeholder="3000"
+                    inputMode="numeric"
+                    placeholder=""
                     value={form.chineseCost}
                     onChange={(e) => updateForm("chineseCost", e.target.value)}
                   />
@@ -807,13 +785,18 @@ export default function NewOrderPage() {
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="text-sm text-muted-foreground mb-1 block">Расходы на материалы</label>
-                    <Input type="number" placeholder="2500" value={form.materialCost} onChange={(e) => updateForm("materialCost", e.target.value)} />
+                    <Input type="number" inputMode="numeric" placeholder="" value={form.materialCost} onChange={(e) => updateForm("materialCost", e.target.value)} />
                   </div>
                   <div>
                     <label className="text-sm text-muted-foreground mb-1 block">Другие расходы</label>
-                    <Input type="number" placeholder="0" value={form.otherCosts} onChange={(e) => updateForm("otherCosts", e.target.value)} />
+                    <Input type="number" inputMode="numeric" placeholder="" value={form.otherCosts} onChange={(e) => updateForm("otherCosts", e.target.value)} />
                   </div>
                 </div>
+
+                <p className="text-xs text-muted-foreground">
+                  Пустое поле считается нулём. Заполняйте только то, что действительно
+                  платите — эти суммы сразу спишутся из кассы.
+                </p>
 
                 <div className="p-4 rounded-md bg-primary/5 border border-primary/20 space-y-2">
                   <div className="flex justify-between text-sm">
@@ -858,9 +841,29 @@ export default function NewOrderPage() {
       {saving && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center bg-background/85 backdrop-blur-sm p-6">
           <div className="w-full max-w-sm rounded-lg border border-border bg-card p-6 text-center shadow-2xl">
-            <div className="h-9 w-9 mx-auto rounded-full border-4 border-primary/25 border-t-primary animate-spin" />
-            <p className="font-semibold mt-4">{savingStage}</p>
-            <p className="text-sm text-muted-foreground mt-2">Не закрывайте страницу. При ошибке черновик останется сохранённым.</p>
+            {savedNumber ? (
+              <>
+                <div className="h-12 w-12 mx-auto rounded-full bg-income/15 flex items-center justify-center">
+                  <Check className="h-7 w-7 text-income" />
+                </div>
+                <p className="font-semibold mt-4 text-income">Заказ сохранён</p>
+                <p className="text-sm text-muted-foreground mt-1">№{savedNumber}</p>
+                {prepayment > 0 && (
+                  <p className="text-sm text-muted-foreground mt-1">
+                    Предоплата {formatCurrency(prepayment)} проведена в кассу
+                  </p>
+                )}
+                <p className="text-xs text-muted-foreground mt-3">Открываем список заказов…</p>
+              </>
+            ) : (
+              <>
+                <div className="h-9 w-9 mx-auto rounded-full border-4 border-primary/25 border-t-primary animate-spin" />
+                <p className="font-semibold mt-4">{savingStage}</p>
+                <p className="text-sm text-muted-foreground mt-2">
+                  Не закрывайте страницу. Если что-то пойдёт не так, черновик сохранится.
+                </p>
+              </>
+            )}
           </div>
         </div>
       )}

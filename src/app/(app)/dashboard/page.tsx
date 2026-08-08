@@ -28,7 +28,10 @@ export default function DashboardPage() {
   const { user } = useAuth();
   const [period, setPeriod] = useState<"today" | "week" | "month">("month");
 
-  const { orders, accounts, transactions, auditLog, seamstressPayments, cars } = useData();
+  const {
+    orders, accounts, transactions, auditLog, seamstressPayments, cars,
+    expenseCategories, incomeCategories,
+  } = useData();
 
   // Order stats
   const newOrders = orders.filter((o) => o.status === "new").length;
@@ -138,6 +141,43 @@ export default function DashboardPage() {
     return tasks.slice(0, 8);
   }, [orders, cars]);
 
+  // Сводка за сегодня — что произошло с начала дня
+  const today = useMemo(() => {
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+
+    const txToday = transactions.filter(t => new Date(t.createdAt) >= start);
+    const ordersToday = orders.filter(o => new Date(o.createdAt) >= start);
+
+    const catName = (id?: string) =>
+      [...expenseCategories, ...incomeCategories].find(c => c.id === id)?.name || "";
+
+    const income = txToday.filter(t => t.type === "income").reduce((s, t) => s + t.amount, 0);
+    const expense = txToday.filter(t => t.type === "expense").reduce((s, t) => s + t.amount, 0);
+    const toOksana = txToday
+      .filter(t => t.type === "expense" && catName(t.categoryId) === "Оплата Оксане")
+      .reduce((s, t) => s + t.amount, 0);
+    const toChina = txToday
+      .filter(t => t.type === "expense" && catName(t.categoryId) === "Оплата китайцам")
+      .reduce((s, t) => s + t.amount, 0);
+
+    // Заказы, законченные сегодня
+    const finishedToday = orders.filter(o =>
+      o.statusHistory.some(h =>
+        new Date(h.timestamp) >= start && h.newStatus === "completed"
+      )
+    ).length;
+
+    return {
+      newOrders: ordersToday.length,
+      newOrdersSum: ordersToday.reduce((s, o) => s + o.totalPrice, 0),
+      income, expense, toOksana, toChina,
+      finished: finishedToday,
+      earned: income - expense,
+      hasActivity: txToday.length > 0 || ordersToday.length > 0 || finishedToday > 0,
+    };
+  }, [transactions, orders, expenseCategories, incomeCategories]);
+
   // Проверка пользователя — строго после всех хуков,
   // иначе React ругается на разное количество вызовов хуков.
   if (!user) return null;
@@ -164,6 +204,64 @@ export default function DashboardPage() {
           <NotificationCenter />
         </div>
       </div>
+
+      {/* Сводка за сегодня */}
+      <Card className="border-primary/25 bg-gradient-to-br from-primary/8 to-transparent">
+        <CardContent className="p-4">
+          <div className="flex items-baseline justify-between gap-2">
+            <h2 className="font-bold">Сегодня</h2>
+            <span className="text-xs text-muted-foreground">
+              {now.toLocaleDateString("ru-RU", { day: "numeric", month: "long" })}
+            </span>
+          </div>
+
+          {!today.hasActivity ? (
+            <p className="mt-2 text-sm text-muted-foreground">
+              Пока тихо — ни заказов, ни движений по деньгам
+            </p>
+          ) : (
+            <>
+              <div className="mt-3 grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+                <div className="rounded-md bg-background p-2.5">
+                  <p className="text-[11px] text-muted-foreground">Новых заказов</p>
+                  <p className="text-xl font-bold">{today.newOrders}</p>
+                  {today.newOrdersSum > 0 && (
+                    <p className="text-[11px] text-muted-foreground">
+                      на {formatCurrency(today.newOrdersSum)}
+                    </p>
+                  )}
+                </div>
+                <div className="rounded-md bg-background p-2.5">
+                  <p className="text-[11px] text-muted-foreground">Завершено</p>
+                  <p className="text-xl font-bold">{today.finished}</p>
+                </div>
+                <div className="rounded-md bg-background p-2.5">
+                  <p className="text-[11px] text-muted-foreground">Пришло денег</p>
+                  <p className="text-xl font-bold text-income">{formatCurrency(today.income)}</p>
+                </div>
+                <div className="rounded-md bg-background p-2.5">
+                  <p className="text-[11px] text-muted-foreground">Потрачено</p>
+                  <p className="text-xl font-bold text-expense">{formatCurrency(today.expense)}</p>
+                </div>
+              </div>
+
+              {(today.toOksana > 0 || today.toChina > 0) && (
+                <div className="mt-2.5 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                  {today.toOksana > 0 && <span>Оксане отдали {formatCurrency(today.toOksana)}</span>}
+                  {today.toChina > 0 && <span>Китайцам отдали {formatCurrency(today.toChina)}</span>}
+                </div>
+              )}
+
+              <div className="mt-3 flex items-baseline justify-between border-t border-border pt-2.5">
+                <span className="text-sm text-muted-foreground">Итог дня</span>
+                <span className={`text-lg font-bold ${today.earned >= 0 ? "text-income" : "text-expense"}`}>
+                  {today.earned >= 0 ? "+" : ""}{formatCurrency(today.earned)}
+                </span>
+              </div>
+            </>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Period Switcher */}
       <div className="flex gap-2">

@@ -85,11 +85,47 @@ export interface AppData {
 
   // Mutations
   createOrder: (order: Partial<Order>) => Promise<Order | null>;
+  /**
+   * Создаёт заказ и, если указана оплата, проводит её одной неделимой
+   * серверной операцией: заказ + транзакция + баланс счёта + журнал.
+   * Заказ не может остаться с оплатой без финансовой операции.
+   */
+  createOrderWithPayment: (
+    order: Partial<Order>,
+    payment?: { amount: number; accountId: string; method: string; comment?: string }
+  ) => Promise<Order | null>;
+  /**
+   * Клиент + автомобиль + заказ + предоплата одним запросом к серверу.
+   * Раньше это были три последовательных обращения — отсюда долгое
+   * сохранение и «половинки» при обрыве связи.
+   */
+  /**
+   * Сохраняет клиента, автомобиль и заказ одним запросом.
+   * Возвращает обновлённый заказ — полная перезагрузка данных не нужна.
+   */
+  updateFullOrder: (input: {
+    orderId: string;
+    client?: { name: string; phone: string; phone2?: string; messenger?: string; comment?: string; source?: string };
+    car?: { brand: string; model: string; generation?: string; year?: number; body?: string; plateNumber?: string; comment?: string };
+    order?: Partial<Order>;
+  }) => Promise<boolean>;
+  createFullOrder: (input: {
+    client: { id?: string; name: string; phone: string; phone2?: string; messenger?: string; comment?: string; source?: string };
+    car: { id?: string; brand: string; model: string; generation?: string; year?: number; body?: string; plateNumber?: string; comment?: string };
+    order: Partial<Order>;
+    payment?: { amount: number; accountId: string; method: string };
+  }) => Promise<{ id: string; number: string; clientId: string; carId: string } | null>;
   updateOrder: (id: string, updates: Partial<Order>) => Promise<boolean>;
   updateOrderStatus: (id: string, status: OrderStatus) => Promise<boolean>;
   createClient: (client: Partial<Client>) => Promise<Client | null>;
   updateClient: (id: string, updates: Partial<Client>) => Promise<boolean>;
   createTransaction: (tx: Partial<Transaction>) => Promise<Transaction | null>;
+  /** Удалить ошибочную операцию. Баланс и оплата заказа пересчитаются. */
+  deleteTransaction: (id: string, reason?: string) => Promise<{ ok: boolean; error?: string }>;
+  /** Изменить сумму, счёт, категорию или комментарий операции. */
+  updateTransaction: (id: string, patch: {
+    amount?: number; accountId?: string; categoryId?: string; description?: string;
+  }) => Promise<{ ok: boolean; error?: string }>;
   createCar: (car: Partial<Car>) => Promise<Car | null>;
   updateCar: (id: string, updates: Partial<Car>) => Promise<boolean>;
   addTemplate: (tpl: TemplateItem) => Promise<boolean>;
@@ -99,6 +135,24 @@ export interface AppData {
     orderId: string; amount: number; accountId: string; method: string;
     comment?: string; receiptPhoto?: string; markDelivered?: boolean;
   }) => Promise<boolean>;
+  /**
+   * Отмена заказа. Если по нему были получены деньги, они автоматически
+   * возвращаются клиенту: создаётся расход в категории «Возвраты»,
+   * касса уменьшается, полученное по заказу обнуляется.
+   */
+  /**
+   * Полные фотографии заказа. В общий список они не входят —
+   * тяжёлые снимки грузятся только когда открывают карточку.
+   */
+  loadOrderMedia: (orderId: string) => Promise<{ photos: string[]; layoutImage: string | null } | null>;
+  cancelOrder: (orderId: string, options?: {
+    accountId?: string;
+    reason?: string;
+    /** Что всё же выплачиваем, несмотря на отмену */
+    keepSeamstress?: number;
+    keepChinese?: number;
+    keepMaterial?: number;
+  }) => Promise<{ ok: boolean; refunded: number; error?: string }>;
   recordOrderAudit: (orderId: string, details: string) => Promise<void>;
   saveAdminUser: (id: string | null, input: AdminUserInput) => Promise<AdminMutationResult>;
   saveAdminStatus: (id: string | null, input: AdminStatusInput) => Promise<AdminMutationResult>;
@@ -185,11 +239,27 @@ function mapTransactionRow(t: Record<string, any>): Transaction {
   } as Transaction;
 }
 
+/** Сколько держим неотправленную операцию, прежде чем считать её застрявшей. */
+const OUTBOX_MAX_AGE_MS = 60 * 60 * 1000;
+
+/**
+ * Очередь операций, которые не успели уйти на сервер.
+ * Записи старше часа отбрасываем: за это время было много попыток,
+ * и «вечная» запись начинает показываться рядом с настоящей операцией,
+ * задваивая суммы на экране.
+ */
 function readFinanceOutbox(): Transaction[] {
   if (typeof window === "undefined") return [];
   try {
     const value = JSON.parse(window.localStorage.getItem(financeOutboxKey) || "[]");
-    return Array.isArray(value) ? value : [];
+    if (!Array.isArray(value)) return [];
+    const now = Date.now();
+    const fresh = (value as Transaction[]).filter(item => {
+      const age = now - new Date(item.createdAt).getTime();
+      return Number.isFinite(age) && age < OUTBOX_MAX_AGE_MS;
+    });
+    if (fresh.length !== value.length) writeFinanceOutbox(fresh);
+    return fresh;
   } catch {
     return [];
   }
@@ -292,6 +362,112 @@ function useDemoData(): AppData {
     return order;
   }, [user]);
 
+  // Демо-режим: та же логика, но без сервера — оплата всегда создаёт операцию
+  const createOrderWithPayment = useCallback(async (
+    o: Partial<Order>,
+    payment?: { amount: number; accountId: string; method: string; comment?: string }
+  ) => {
+    const amount = payment?.amount || 0;
+    const order = {
+      ...o,
+      id: o.id || `order_${Date.now()}`,
+      number: o.number || `${new Date().getDate().toString().padStart(2,"0")}${(new Date().getMonth()+1).toString().padStart(2,"0")}-${Math.floor(Math.random()*900)+100}`,
+      status: "new" as OrderStatus,
+      priority: o.priority || "normal",
+      createdById: o.createdById || user?.id,
+      createdAt: new Date().toISOString(),
+      paid: amount,
+      remaining: (o.totalPrice || 0) - amount,
+      chineseCost: o.chineseCost || 0,
+      plannedProfit: (o.totalPrice || 0) - (o.materialCost || 0) - (o.otherCosts || 0) - (o.seamstressPayment || 0) - (o.chineseCost || 0),
+      statusHistory: [],
+      photos: o.photos || [],
+      kitTypes: o.kitTypes || [],
+    } as Order;
+    setOrders(prev => [order, ...prev]);
+
+    if (amount > 0 && payment) {
+      setTransactions(prev => [{
+        id: `tx_${Date.now()}`,
+        type: "income",
+        amount,
+        accountId: payment.accountId,
+        orderId: order.id,
+        clientId: order.clientId,
+        paymentType: amount >= (o.totalPrice || 0) ? "full" : "prepayment",
+        description: `${payment.method}${payment.comment ? ` · ${payment.comment}` : ""}`,
+        userId: user?.id || "",
+        userName: user?.name || "",
+        createdAt: new Date().toISOString(),
+      } as Transaction, ...prev]);
+    }
+    return order;
+  }, [user]);
+
+  const createFullOrder = useCallback(async (input: {
+    client: { id?: string; name: string; phone: string; phone2?: string; messenger?: string; comment?: string; source?: string };
+    car: { id?: string; brand: string; model: string; generation?: string; year?: number; body?: string; plateNumber?: string; comment?: string };
+    order: Partial<Order>;
+    payment?: { amount: number; accountId: string; method: string };
+  }) => {
+    const clientId = input.client.id || `client_${Date.now()}`;
+    const carId = input.car.id || `car_${Date.now()}`;
+    const orderId = input.order.id || `order_${Date.now()}`;
+    const number = input.order.number
+      || `${new Date().getDate().toString().padStart(2,"0")}${(new Date().getMonth()+1).toString().padStart(2,"0")}-${Math.floor(Math.random()*900)+100}`;
+    const amount = input.payment?.amount || 0;
+
+    if (!input.client.id) {
+      setClients(prev => [{ ...input.client, id: clientId, createdAt: new Date().toISOString() } as Client, ...prev]);
+    }
+    if (!input.car.id) {
+      setCars(prev => [{ ...input.car, id: carId, clientId } as Car, ...prev]);
+    }
+    const total = input.order.totalPrice || 0;
+    setOrders(prev => [{
+      ...input.order,
+      id: orderId, number, clientId, carId,
+      status: "new" as OrderStatus,
+      priority: input.order.priority || "normal",
+      createdById: user?.id,
+      createdAt: new Date().toISOString(),
+      paid: amount,
+      remaining: total - amount,
+      chineseCost: input.order.chineseCost || 0,
+      plannedProfit: total - (input.order.materialCost || 0) - (input.order.otherCosts || 0)
+        - (input.order.seamstressPayment || 0) - (input.order.chineseCost || 0),
+      statusHistory: [], photos: input.order.photos || [], kitTypes: input.order.kitTypes || [],
+    } as Order, ...prev]);
+
+    if (amount > 0 && input.payment) {
+      setTransactions(prev => [{
+        id: `tx_${Date.now()}`, type: "income", amount,
+        accountId: input.payment!.accountId, orderId, clientId,
+        paymentType: amount >= total ? "full" : "prepayment",
+        description: `${input.payment!.method} · Предоплата при создании заказа`,
+        userId: user?.id || "", userName: user?.name || "",
+        createdAt: new Date().toISOString(),
+      } as Transaction, ...prev]);
+    }
+    return { id: orderId, number, clientId, carId };
+  }, [user]);
+
+  // Демо-режим: то же самое, но локально
+  const updateFullOrder = useCallback(async (input: {
+    orderId: string;
+    client?: { name: string; phone: string; phone2?: string; messenger?: string; comment?: string; source?: string };
+    car?: { brand: string; model: string; generation?: string; year?: number; body?: string; plateNumber?: string; comment?: string };
+    order?: Partial<Order>;
+  }) => {
+    if (input.order) {
+      setOrders(prev => prev.map(o => o.id === input.orderId ? { ...o, ...input.order } : o));
+    }
+    if (input.client) {
+      setClients(prev => prev.map(c => c.id === input.orderId ? c : c));
+    }
+    return true;
+  }, []);
+
   const updateOrder = useCallback(async (id: string, updates: Partial<Order>) => {
     setOrders(prev => prev.map(o => o.id === id ? { ...o, ...updates } : o));
     if (user) {
@@ -308,6 +484,48 @@ function useDemoData(): AppData {
     }
     return true;
   }, [user]);
+
+  // Демо-режим: удаление и правка операций локально
+  const deleteTransaction = useCallback(async (id: string) => {
+    setTransactions(prev => prev.filter(t => t.id !== id));
+    return { ok: true };
+  }, []);
+
+  const updateTransaction = useCallback(async (id: string, patch: {
+    amount?: number; accountId?: string; categoryId?: string; description?: string;
+  }) => {
+    setTransactions(prev => prev.map(t => t.id === id ? { ...t, ...patch } : t));
+    return { ok: true };
+  }, []);
+
+  // Демо-режим: фото уже лежат в самом заказе
+  const loadOrderMedia = useCallback(async (orderId: string) => {
+    const order = orders.find(o => o.id === orderId);
+    if (!order) return null;
+    return { photos: order.photos || [], layoutImage: order.layoutImage ?? null };
+  }, [orders]);
+
+  // Демо-режим: возврат клиенту, выплаты подрядчикам — по выбору
+  const cancelOrder = useCallback(async (orderId: string, options?: {
+    accountId?: string; reason?: string;
+    keepSeamstress?: number; keepChinese?: number; keepMaterial?: number;
+  }) => {
+    let refunded = 0;
+    setOrders(prev => prev.map(o => {
+      if (o.id !== orderId) return o;
+      refunded = o.paid;
+      return {
+        ...o,
+        status: "cancelled" as OrderStatus,
+        paid: 0,
+        remaining: o.totalPrice,
+        seamstressPayment: Math.min(options?.keepSeamstress || 0, o.seamstressPayment),
+        chineseCost: Math.min(options?.keepChinese || 0, o.chineseCost || 0),
+        materialCost: Math.min(options?.keepMaterial || 0, o.materialCost),
+      };
+    }));
+    return { ok: true, refunded };
+  }, []);
 
   const updateOrderStatus = useCallback(async (id: string, status: OrderStatus) => {
     setOrders(prev => prev.map(o => o.id === id ? { ...o, status } : o));
@@ -440,11 +658,13 @@ function useDemoData(): AppData {
     templates,
     loading: false,
     error: null,
-    createOrder, updateOrder, updateOrderStatus,
+    createOrder, createOrderWithPayment, createFullOrder, updateFullOrder,
+    updateOrder, updateOrderStatus,
     createClient, updateClient, createTransaction,
+    deleteTransaction, updateTransaction, loadOrderMedia,
     createCar, updateCar, addTemplate, refresh,
     markNotificationRead, markAllNotificationsRead,
-    receiveOrderPayment,
+    receiveOrderPayment, cancelOrder,
     recordOrderAudit,
     saveAdminUser, saveAdminStatus, saveAdminCategory, saveAdminAccount,
   };
@@ -496,19 +716,27 @@ function useSupabaseData(): AppData {
         { data: seamstressPayments },
         { data: auditLog },
         { data: notifications },
-      ] = await Promise.all([
-        user.role === "admin" ? sb.from("profiles").select("*").order("created_at") : sb.from("profiles").select("*").eq("active", true),
-        sb.from("order_statuses").select("*").order("sort_order"),
-        sb.from("accounts").select("*").order("sort_order"),
-        sb.from("categories").select("*").order("sort_order"),
-        sb.from("clients").select("*").order("created_at", { ascending: false }),
-        sb.from("cars").select("*"),
-        sb.from("orders").select("*, order_status_history(*)").order("created_at", { ascending: false }),
-        sb.from("transactions").select("*").order("created_at", { ascending: false }),
-        sb.from("seamstress_payments").select("*"),
-        sb.from("audit_log").select("*").order("created_at", { ascending: false }).limit(200),
-        sb.from("notifications").select("*").eq("user_id", user.id).order("created_at", { ascending: false }).limit(50),
-      ]);
+      ] = await (async (): Promise<{ data: any[] }[]> => {
+        // Один запрос вместо одиннадцати. При удалённой базе каждое
+        // обращение стоит сотни миллисекунд, поэтому важно не количество
+        // данных, а количество поездок до сервера.
+        const { data: bundle, error: bundleError } = await sb.rpc("get_app_data");
+        if (bundleError) throw new Error(bundleError.message);
+        const b = (bundle || {}) as Record<string, any[]>;
+        return [
+          { data: b.profiles || [] },
+          { data: b.statuses || [] },
+          { data: b.accounts || [] },
+          { data: b.categories || [] },
+          { data: b.clients || [] },
+          { data: b.cars || [] },
+          { data: b.orders || [] },
+          { data: b.transactions || [] },
+          { data: b.seamstress_payments || [] },
+          { data: b.audit_log || [] },
+          { data: b.notifications || [] },
+        ];
+      })();
 
       const remoteTransactions = (transactions || []).map(mapTransactionRow);
       const remoteTransactionIds = new Set(remoteTransactions.map(item => item.id));
@@ -527,10 +755,15 @@ function useSupabaseData(): AppData {
           active: p.active, avatar: p.avatar_url, lastLogin: p.last_login,
           createdAt: p.created_at,
         })),
-        statuses: (statuses || []).filter(s => !legacyStatusKeys.has(s.key)).map(s => ({
-          id: s.id, key: s.key, label: s.label, color: s.color,
-          isFinal: s.is_final, order: s.sort_order,
-        })),
+        // Источник правды — флаг active в базе, а не список ключей в коде.
+        // Так статусы, добавленные через админку, сразу видны, а отключённые
+        // не всплывают в канбане и фильтрах.
+        statuses: (statuses || [])
+          .filter(s => s.active !== false)
+          .map(s => ({
+            id: s.id, key: s.key, label: s.label, color: s.color,
+            isFinal: s.is_final, order: s.sort_order,
+          })),
         accounts: applyLedgerBalances(rawAccounts, allTransactions),
         expenseCategories: (categories || []).filter(c => c.type === "expense").map(c => ({
           id: c.id, name: c.name, type: c.type as "expense", icon: c.icon || "📦",
@@ -587,18 +820,30 @@ function useSupabaseData(): AppData {
     if (!sb || !user || syncingCoreData.current) return;
     syncingCoreData.current = true;
     try {
-      const [clientsResult, carsResult, ordersResult] = await Promise.all([
-        sb.from("clients").select("*").order("created_at", { ascending: false }),
-        sb.from("cars").select("*"),
-        sb.from("orders").select("*, order_status_history(*)").order("created_at", { ascending: false }),
-      ]);
-      const firstError = clientsResult.error || carsResult.error || ordersResult.error;
-      if (firstError) throw firstError;
+      // Фоновая синхронизация тоже одним запросом
+      const { data: bundle, error: bundleError } = await sb.rpc("get_app_data");
+      if (bundleError) throw bundleError;
+      const b = bundle || {};
+      const remoteTransactions = (b.transactions || []).map(mapTransactionRow);
+      const remoteIds = new Set(remoteTransactions.map((t: Transaction) => t.id));
+      const pending = readFinanceOutbox().filter(item => !remoteIds.has(item.id));
+      const allTransactions = [...pending, ...remoteTransactions]
+        .sort((a, b2) => new Date(b2.createdAt).getTime() - new Date(a.createdAt).getTime());
+
       setData(prev => ({
         ...prev,
-        clients: (clientsResult.data || []).map(mapClientRow),
-        cars: (carsResult.data || []).map(mapCarRow),
-        orders: (ordersResult.data || []).map(mapOrderRow),
+        clients: (b.clients || []).map(mapClientRow),
+        cars: (b.cars || []).map(mapCarRow),
+        orders: (b.orders || []).map(mapOrderRow),
+        transactions: allTransactions,
+        accounts: applyLedgerBalances(
+          (b.accounts || []).map((a: any) => ({
+            id: a.id, name: a.name, type: a.type, icon: a.icon || "💳",
+            balance: Number(a.balance), initialBalance: Number(a.initial_balance),
+            active: a.active, showInTotal: a.show_in_total, order: a.sort_order,
+          })),
+          allTransactions
+        ),
       }));
       setError(null);
     } catch (syncError) {
@@ -723,6 +968,142 @@ function useSupabaseData(): AppData {
     return order;
   }, [user]);
 
+  const createOrderWithPayment = useCallback(async (
+    o: Partial<Order>,
+    payment?: { amount: number; accountId: string; method: string; comment?: string }
+  ): Promise<Order | null> => {
+    const sb = getSupabase();
+    if (!sb) return null;
+
+    const orderId = o.id || crypto.randomUUID();
+
+    const { data: result, error } = await sb.rpc("create_order_with_payment", {
+      p_order: {
+        id: orderId,
+        number: o.number?.trim() || null,
+        client_id: o.clientId,
+        car_id: o.carId,
+        status: "new",
+        kit_types: o.kitTypes || [],
+        material_color: o.materialColor || "",
+        bottom_color: o.bottomColor || null,
+        edge_color: o.edgeColor || "",
+        stitch_color: o.stitchColor || "",
+        stitch_type: o.stitchType || null,
+        extras: o.extras || null,
+        seamstress_comment: o.seamstressComment || null,
+        layout_image: o.layoutImage || null,
+        photos: o.photos || [],
+        assignee_id: o.assigneeId || null,
+        priority: o.priority || "normal",
+        desired_date: o.desiredDate || null,
+        total_price: o.totalPrice || 0,
+        prepayment: o.prepayment || 0,
+        seamstress_payment: o.seamstressPayment || 0,
+        chinese_cost: o.chineseCost || 0,
+        material_cost: o.materialCost || 0,
+        other_costs: o.otherCosts || 0,
+      },
+      p_amount: payment?.amount || 0,
+      p_account_id: payment?.accountId || null,
+      p_method: payment?.method || null,
+      p_comment: payment?.comment || null,
+    });
+
+    if (error) {
+      console.error("Create order with payment error:", error);
+      throw new Error(error.message || "Не удалось создать заказ");
+    }
+
+    // Перечитываем данные с сервера — там уже посчитаны paid, remaining
+    // и плановая прибыль, поэтому локально их не дублируем.
+    await fetchAll();
+
+    const paid = Number(result?.paid ?? 0);
+    return {
+      ...o,
+      id: result?.id || orderId,
+      number: result?.number || o.number,
+      status: "new" as OrderStatus,
+      paid,
+      remaining: Number(o.totalPrice || 0) - paid,
+      photos: o.photos || [],
+      kitTypes: o.kitTypes || [],
+      statusHistory: [],
+    } as Order;
+  }, [fetchAll]);
+
+  const createFullOrder = useCallback(async (input: {
+    client: { id?: string; name: string; phone: string; phone2?: string; messenger?: string; comment?: string; source?: string };
+    car: { id?: string; brand: string; model: string; generation?: string; year?: number; body?: string; plateNumber?: string; comment?: string };
+    order: Partial<Order>;
+    payment?: { amount: number; accountId: string; method: string };
+  }) => {
+    const sb = getSupabase();
+    if (!sb) return null;
+    const o = input.order;
+
+    const { data: result, error } = await sb.rpc("create_full_order", {
+      p_client: {
+        id: input.client.id || null,
+        name: input.client.name,
+        phone: input.client.phone,
+        phone2: input.client.phone2 || null,
+        messenger: input.client.messenger || null,
+        comment: input.client.comment || null,
+        source: input.client.source || null,
+      },
+      p_car: {
+        id: input.car.id || null,
+        brand: input.car.brand,
+        model: input.car.model,
+        generation: input.car.generation || null,
+        year: input.car.year ? String(input.car.year) : null,
+        body: input.car.body || null,
+        plate_number: input.car.plateNumber || null,
+        comment: input.car.comment || null,
+      },
+      p_order: {
+        id: o.id || null,
+        number: o.number || null,
+        status: "new",
+        kit_types: o.kitTypes || [],
+        material_color: o.materialColor || "",
+        edge_color: o.edgeColor || "",
+        stitch_color: o.stitchColor || "",
+        seamstress_comment: o.seamstressComment || null,
+        layout_image: o.layoutImage || null,
+        photos: o.photos || [],
+        assignee_id: o.assigneeId || null,
+        priority: o.priority || "normal",
+        desired_date: o.desiredDate || null,
+        total_price: o.totalPrice || 0,
+        seamstress_payment: o.seamstressPayment || 0,
+        chinese_cost: o.chineseCost || 0,
+        material_cost: o.materialCost || 0,
+        other_costs: o.otherCosts || 0,
+      },
+      p_amount: input.payment?.amount || 0,
+      p_account_id: input.payment?.accountId || null,
+      p_method: input.payment?.method || null,
+    });
+
+    if (error) {
+      console.error("create_full_order error:", error);
+      throw new Error(error.message || "Не удалось сохранить заказ");
+    }
+
+    // Данные подтягиваем в фоне — пользователь не ждёт полной перезагрузки
+    void fetchAll();
+
+    return {
+      id: result.id as string,
+      number: result.number as string,
+      clientId: result.client_id as string,
+      carId: result.car_id as string,
+    };
+  }, [fetchAll]);
+
   const updateOrder = useCallback(async (id: string, updates: Partial<Order>): Promise<boolean> => {
     const sb = getSupabase();
     if (!sb) return false;
@@ -787,6 +1168,78 @@ function useSupabaseData(): AppData {
     }
     return true;
   }, [data.orders, user]);
+
+  const updateFullOrder = useCallback(async (input: {
+    orderId: string;
+    client?: { name: string; phone: string; phone2?: string; messenger?: string; comment?: string; source?: string };
+    car?: { brand: string; model: string; generation?: string; year?: number; body?: string; plateNumber?: string; comment?: string };
+    order?: Partial<Order>;
+  }): Promise<boolean> => {
+    const sb = getSupabase();
+    if (!sb) return false;
+    const o = input.order;
+
+    const { data: row, error } = await sb.rpc("update_full_order", {
+      p_order_id: input.orderId,
+      p_client: input.client ? {
+        name: input.client.name,
+        phone: input.client.phone,
+        phone2: input.client.phone2 || null,
+        messenger: input.client.messenger || null,
+        comment: input.client.comment || null,
+        source: input.client.source || null,
+      } : null,
+      p_car: input.car ? {
+        brand: input.car.brand,
+        model: input.car.model,
+        generation: input.car.generation || null,
+        year: input.car.year ? String(input.car.year) : null,
+        body: input.car.body || null,
+        plate_number: input.car.plateNumber || null,
+        comment: input.car.comment || null,
+      } : null,
+      p_order: o ? {
+        kit_types: o.kitTypes || [],
+        assignee_id: o.assigneeId || null,
+        desired_date: o.desiredDate || null,
+        priority: o.priority || null,
+        total_price: o.totalPrice ?? null,
+        seamstress_payment: o.seamstressPayment ?? null,
+        chinese_cost: o.chineseCost ?? null,
+        material_cost: o.materialCost ?? null,
+        other_costs: o.otherCosts ?? null,
+        seamstress_comment: o.seamstressComment ?? "",
+        layout_image: o.layoutImage ?? "",
+        photos: o.photos || [],
+      } : null,
+    });
+
+    if (error) {
+      console.error("update_full_order error:", error);
+      throw new Error(error.message || "Не удалось сохранить изменения");
+    }
+
+    // Обновляем заказ локально из ответа сервера —
+    // перезагружать все данные не нужно
+    if (row) {
+      const updated = mapOrderRow({ ...row, order_status_history: [] });
+      setData(prev => ({
+        ...prev,
+        orders: prev.orders.map(item =>
+          item.id === input.orderId
+            ? { ...updated, statusHistory: item.statusHistory }
+            : item
+        ),
+        clients: input.client
+          ? prev.clients.map(c => c.id === updated.clientId ? { ...c, ...input.client } : c)
+          : prev.clients,
+        cars: input.car
+          ? prev.cars.map(c => c.id === updated.carId ? { ...c, ...input.car } : c)
+          : prev.cars,
+      }));
+    }
+    return true;
+  }, []);
 
   const updateOrderStatus = useCallback(async (id: string, status: OrderStatus): Promise<boolean> => {
     const sb = getSupabase();
@@ -897,24 +1350,20 @@ function useSupabaseData(): AppData {
       writeFinanceOutbox([...queued, transaction]);
     }
 
-    // Update the screen immediately. A stable id makes every retry idempotent.
-    setData(prev => ({
-      ...prev,
-      transactions: prev.transactions.some(item => item.id === transaction.id)
+    // Показываем сразу. Баланс НЕ трогаем вручную: он всегда
+    // пересчитывается из списка операций через applyLedgerBalances.
+    // Ручная правка приводила к двойному вычитанию и минусу на счёте.
+    setData(prev => {
+      const already = prev.transactions.some(item => item.id === transaction.id);
+      const nextTransactions = already
         ? prev.transactions
-        : [transaction, ...prev.transactions],
-      accounts: prev.accounts.map(account => {
-        if (!tx.amount) return account;
-        if (account.id === tx.accountId) {
-          const delta = tx.type === "income" ? tx.amount : -tx.amount;
-          return { ...account, balance: account.balance + delta };
-        }
-        if (tx.type === "transfer" && account.id === tx.toAccountId) {
-          return { ...account, balance: account.balance + tx.amount };
-        }
-        return account;
-      }),
-    }));
+        : [transaction, ...prev.transactions];
+      return {
+        ...prev,
+        transactions: nextTransactions,
+        accounts: applyLedgerBalances(prev.accounts, nextTransactions),
+      };
+    });
 
     // The transaction ledger is the source of truth for balances. This is one
     // request instead of insert + one or two sequential balance mutations.
@@ -1102,6 +1551,90 @@ function useSupabaseData(): AppData {
     return true;
   }, [user, data.orders]);
 
+  const deleteTransaction = useCallback(async (id: string, reason?: string) => {
+    const sb = getSupabase();
+    if (!sb) return { ok: false, error: "Нет соединения" };
+    const { error } = await sb.rpc("delete_transaction", { p_id: id, p_reason: reason || null });
+    if (error) return { ok: false, error: error.message };
+    // Убираем и из очереди, чтобы удалённая операция не вернулась
+    writeFinanceOutbox(readFinanceOutbox().filter(item => item.id !== id));
+    setData(prev => {
+      const nextTransactions = prev.transactions.filter(t => t.id !== id);
+      return {
+        ...prev,
+        transactions: nextTransactions,
+        accounts: applyLedgerBalances(prev.accounts, nextTransactions),
+      };
+    });
+    return { ok: true };
+  }, []);
+
+  const updateTransaction = useCallback(async (id: string, patch: {
+    amount?: number; accountId?: string; categoryId?: string; description?: string;
+  }) => {
+    const sb = getSupabase();
+    if (!sb) return { ok: false, error: "Нет соединения" };
+    const { error } = await sb.rpc("update_transaction", {
+      p_id: id,
+      p_amount: patch.amount ?? null,
+      p_account_id: patch.accountId ?? null,
+      p_category_id: patch.categoryId ?? null,
+      p_description: patch.description ?? null,
+    });
+    if (error) return { ok: false, error: error.message };
+    setData(prev => {
+      const nextTransactions = prev.transactions.map(t => t.id === id ? {
+        ...t,
+        amount: patch.amount ?? t.amount,
+        accountId: patch.accountId ?? t.accountId,
+        categoryId: patch.categoryId ?? t.categoryId,
+        description: patch.description ?? t.description,
+      } : t);
+      return {
+        ...prev,
+        transactions: nextTransactions,
+        accounts: applyLedgerBalances(prev.accounts, nextTransactions),
+      };
+    });
+    return { ok: true };
+  }, []);
+
+  const loadOrderMedia = useCallback(async (orderId: string) => {
+    const sb = getSupabase();
+    if (!sb) return null;
+    const { data, error } = await sb.rpc("get_order_media", { p_order_id: orderId });
+    if (error) {
+      console.error("get_order_media error:", error);
+      return null;
+    }
+    return {
+      photos: (data?.photos || []) as string[],
+      layoutImage: (data?.layout_image ?? null) as string | null,
+    };
+  }, []);
+
+  const cancelOrder = useCallback(async (orderId: string, options?: {
+    accountId?: string; reason?: string;
+    keepSeamstress?: number; keepChinese?: number; keepMaterial?: number;
+  }) => {
+    const sb = getSupabase();
+    if (!sb) return { ok: false, refunded: 0, error: "Нет соединения с базой" };
+    const { data: result, error } = await sb.rpc("cancel_order", {
+      p_order_id: orderId,
+      p_account_id: options?.accountId || null,
+      p_reason: options?.reason || null,
+      p_keep_seamstress: options?.keepSeamstress || 0,
+      p_keep_chinese: options?.keepChinese || 0,
+      p_keep_material: options?.keepMaterial || 0,
+    });
+    if (error) {
+      console.error("cancel_order error:", error);
+      return { ok: false, refunded: 0, error: error.message };
+    }
+    await fetchAll();
+    return { ok: true, refunded: Number(result?.refunded || 0) };
+  }, [fetchAll]);
+
   const recordOrderAudit = useCallback(async (orderId: string, details: string) => {
     const sb = getSupabase();
     if (!sb || !user) return;
@@ -1172,11 +1705,13 @@ function useSupabaseData(): AppData {
     ...data,
     loading,
     error,
-    createOrder, updateOrder, updateOrderStatus,
+    createOrder, createOrderWithPayment, createFullOrder, updateFullOrder,
+    updateOrder, updateOrderStatus,
     createClient, updateClient, createTransaction,
+    deleteTransaction, updateTransaction, loadOrderMedia,
     createCar, updateCar, addTemplate, refresh: syncCoreData,
     markNotificationRead, markAllNotificationsRead,
-    receiveOrderPayment,
+    receiveOrderPayment, cancelOrder,
     recordOrderAudit,
     saveAdminUser, saveAdminStatus, saveAdminCategory, saveAdminAccount,
   };

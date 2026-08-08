@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent, type ReactNode } from "react";
+import { useState, useEffect, type FormEvent, type ReactNode } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -16,9 +16,11 @@ import { isSupabaseMode } from "@/lib/supabase";
 import {
   Users, Tag, CreditCard, Palette, Package, Settings, Clock, Plus,
   Edit2, AlertTriangle, Download, X, Loader2, CheckCircle2, ShieldCheck,
+  DatabaseBackup, RotateCcw, Save,
 } from "lucide-react";
+import { getSupabase } from "@/lib/supabase";
 
-type AdminSection = "users" | "statuses" | "categories" | "accounts" | "catalogs" | "audit" | "settings";
+type AdminSection = "users" | "statuses" | "categories" | "accounts" | "catalogs" | "audit" | "backups" | "settings";
 type EditorState =
   | { kind: "user"; item: User | null }
   | { kind: "status"; item: OrderStatusConfig | null }
@@ -32,6 +34,7 @@ const sections: { key: AdminSection; label: string; icon: typeof Users }[] = [
   { key: "accounts", label: "Счета", icon: CreditCard },
   { key: "catalogs", label: "Каталоги", icon: Palette },
   { key: "audit", label: "Журнал действий", icon: Clock },
+  { key: "backups", label: "Резервные копии", icon: DatabaseBackup },
   { key: "settings", label: "Настройки", icon: Settings },
 ];
 
@@ -102,7 +105,212 @@ function AdminContent({ section, openEditor }: { section: AdminSection; openEdit
 
   if (section === "audit") return <div className="space-y-3"><h2 className="text-lg font-semibold">Журнал действий</h2>{auditLog.length === 0 ? <EmptyState text="Действий пока нет" /> : auditLog.map((entry) => <div key={entry.id} className="flex items-start gap-3 p-3 rounded-md bg-card border border-border"><div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0"><span className="text-xs font-bold text-primary">{entry.userName[0]}</span></div><div className="flex-1 min-w-0"><p className="text-sm">{entry.details}</p><p className="text-[10px] text-muted-foreground mt-0.5">{entry.userName} · {formatDateTime(entry.timestamp)}</p></div></div>)}</div>;
 
-  return <div className="space-y-4"><h2 className="text-lg font-semibold">Настройки</h2><Card><CardContent className="p-4 space-y-4"><SettingRow label="Режим данных" value={isSupabaseMode ? "Рабочая база Supabase" : "Демо-данные"} /><SettingRow label="Часовой пояс" value="UTC+7 (Барнаул)" /><SettingRow label="Валюта" value="Российский рубль (₽)" /><SettingRow label="Формат даты" value="ДД.ММ.ГГГГ" /></CardContent></Card><div className="rounded-md border border-primary/20 bg-primary/5 p-4 text-sm"><div className="flex gap-2"><ShieldCheck className="h-5 w-5 shrink-0 text-primary" /><div><p className="font-semibold">Изменения защищены правами администратора</p><p className="mt-1 text-xs text-muted-foreground">Менеджеры и Оксана не могут менять пользователей, статусы, категории и счета.</p></div></div></div></div>;
+  if (section === "backups") return <BackupsSection />;
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+
+  return <div className="space-y-4"><h2 className="text-lg font-semibold">Настройки</h2><IntegrityCheck /><Card><CardContent className="p-4 space-y-4"><SettingRow label="Режим данных" value={isSupabaseMode ? "Рабочая база Supabase" : "Демо-данные"} /><SettingRow label="Часовой пояс" value="UTC+7 (Барнаул)" /><SettingRow label="Валюта" value="Российский рубль (₽)" /><SettingRow label="Формат даты" value="ДД.ММ.ГГГГ" /></CardContent></Card><div className="rounded-md border border-primary/20 bg-primary/5 p-4 text-sm"><div className="flex gap-2"><ShieldCheck className="h-5 w-5 shrink-0 text-primary" /><div><p className="font-semibold">Изменения защищены правами администратора</p><p className="mt-1 text-xs text-muted-foreground">Менеджеры и Оксана не могут менять пользователей, статусы, категории и счета.</p></div></div></div></div>;
+}
+
+type BackupRow = {
+  id: string;
+  created_at: string;
+  kind: string;
+  note: string | null;
+  row_counts: Record<string, number>;
+  size_bytes: number | null;
+};
+
+type IntegrityRow = { проблема: string; деталь: string; серьёзность: string };
+
+/** Постоянная проверка: находит любые расхождения в деньгах. */
+function IntegrityCheck() {
+  const [rows, setRows] = useState<IntegrityRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  const run = async () => {
+    const sb = getSupabase();
+    if (!sb) { setLoading(false); return; }
+    setLoading(true);
+    const { data, error: err } = await sb.rpc("check_finance_integrity");
+    if (err) setError(err.message);
+    else { setRows((data || []) as IntegrityRow[]); setError(""); }
+    setLoading(false);
+  };
+
+  useEffect(() => { void run(); }, []);
+
+  const critical = rows.filter(r => r.серьёзность === "критично");
+  const warnings = rows.filter(r => r.серьёзность !== "критично");
+
+  return (
+    <Card>
+      <CardContent className="p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-semibold">Проверка финансов</h3>
+            <p className="text-xs text-muted-foreground">
+              Сверяет заказы, кассу и выплаты между собой
+            </p>
+          </div>
+          <Button size="sm" variant="outline" onClick={() => void run()} disabled={loading}>
+            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Проверить"}
+          </Button>
+        </div>
+
+        {error && <p className="mt-3 text-sm text-expense">{error}</p>}
+
+        {!loading && !error && rows.length === 0 && (
+          <div className="mt-3 flex items-center gap-2 rounded-md border border-income/30 bg-income/10 p-3">
+            <CheckCircle2 className="h-5 w-5 text-income shrink-0" />
+            <p className="text-sm text-income">Расхождений нет — всё сходится</p>
+          </div>
+        )}
+
+        {critical.length > 0 && (
+          <div className="mt-3 space-y-2">
+            {critical.map((r, i) => (
+              <div key={i} className="rounded-md border border-expense/40 bg-expense/5 p-3">
+                <p className="text-sm font-semibold text-expense">{r.проблема}</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">{r.деталь}</p>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {warnings.length > 0 && (
+          <div className="mt-3 space-y-2">
+            {warnings.map((r, i) => (
+              <div key={i} className="rounded-md border border-warning/40 bg-warning/5 p-3">
+                <p className="text-sm font-semibold">{r.проблема}</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">{r.деталь}</p>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function BackupsSection() {
+  const [items, setItems] = useState<BackupRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<{ tone: "ok" | "err"; text: string } | null>(null);
+  const [confirmId, setConfirmId] = useState<string | null>(null);
+
+  const load = async () => {
+    const sb = getSupabase();
+    if (!sb) { setLoading(false); return; }
+    const { data, error } = await sb.rpc("admin_list_backups");
+    if (error) setMessage({ tone: "err", text: error.message });
+    else setItems((data || []) as BackupRow[]);
+    setLoading(false);
+  };
+
+  useEffect(() => { void load(); }, []);
+
+  const createNow = async () => {
+    const sb = getSupabase();
+    if (!sb) return;
+    setBusy(true); setMessage(null);
+    const { error } = await sb.rpc("admin_create_backup", { p_note: "Копия вручную из админки" });
+    setBusy(false);
+    if (error) setMessage({ tone: "err", text: error.message });
+    else { setMessage({ tone: "ok", text: "Копия создана" }); void load(); }
+  };
+
+  const restore = async (id: string) => {
+    const sb = getSupabase();
+    if (!sb) return;
+    setBusy(true); setMessage(null); setConfirmId(null);
+    const { error } = await sb.rpc("admin_restore_backup", { p_snapshot: id });
+    setBusy(false);
+    if (error) { setMessage({ tone: "err", text: error.message }); return; }
+    setMessage({ tone: "ok", text: "Данные восстановлены. Перезагрузите страницу." });
+    void load();
+  };
+
+  const kindLabel = (k: string) =>
+    k === "auto" ? "Автоматическая" : k === "manual" ? "Вручную" : "Перед восстановлением";
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-semibold">Резервные копии</h2>
+          <p className="text-sm text-muted-foreground">
+            Копия снимается автоматически каждый день в 03:30
+          </p>
+        </div>
+        <Button size="sm" onClick={() => void createNow()} disabled={busy}>
+          {busy ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Save className="h-4 w-4 mr-1" />}
+          Создать сейчас
+        </Button>
+      </div>
+
+      {message && (
+        <div className={cn("rounded-md border p-3 text-sm",
+          message.tone === "ok" ? "border-income/30 bg-income/10 text-income" : "border-expense/30 bg-expense/10 text-expense")}>
+          {message.text}
+        </div>
+      )}
+
+      <div className="rounded-md border border-border bg-card p-3 text-xs text-muted-foreground">
+        Хранятся 30 последних ежедневных копий, все ручные и по одной на каждый месяц.
+        При восстановлении текущее состояние сохраняется отдельной копией — откатить можно и само восстановление.
+      </div>
+
+      {loading ? (
+        <div className="py-10 text-center"><Loader2 className="h-5 w-5 animate-spin mx-auto text-muted-foreground" /></div>
+      ) : items.length === 0 ? (
+        <EmptyState text="Копий пока нет" />
+      ) : (
+        <div className="space-y-2">
+          {items.map((b) => (
+            <div key={b.id} className="rounded-md border border-border bg-card p-3">
+              <div className="flex items-center gap-3">
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium">{formatDateTime(b.created_at)}</p>
+                  <p className="text-[11px] text-muted-foreground">
+                    {kindLabel(b.kind)}
+                    {b.row_counts && ` · ${b.row_counts.orders} заказов, ${b.row_counts.clients} клиентов, ${b.row_counts.transactions} операций`}
+                    {b.size_bytes ? ` · ${Math.max(1, Math.round(b.size_bytes / 1024))} КБ` : ""}
+                  </p>
+                </div>
+                <Button variant="outline" size="sm" disabled={busy} onClick={() => setConfirmId(b.id)}>
+                  <RotateCcw className="h-4 w-4 mr-1" />
+                  Восстановить
+                </Button>
+              </div>
+
+              {confirmId === b.id && (
+                <div className="mt-3 rounded-md border border-expense/40 bg-expense/5 p-3">
+                  <div className="flex gap-2">
+                    <AlertTriangle className="h-5 w-5 shrink-0 text-expense" />
+                    <div className="text-sm">
+                      <p className="font-semibold">Заменить текущие данные копией от {formatDateTime(b.created_at)}?</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Заказы, клиенты, автомобили и финансы будут заменены. Сотрудники и настройки не затрагиваются.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="mt-3 flex gap-2">
+                    <Button variant="outline" size="sm" className="flex-1" onClick={() => setConfirmId(null)}>Отмена</Button>
+                    <Button size="sm" className="flex-1 bg-expense text-white hover:bg-expense/90"
+                            disabled={busy} onClick={() => void restore(b.id)}>
+                      {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : "Восстановить"}
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function CategoryGroup({ title, type, items, openEditor }: { title: string; type: "income" | "expense"; items: Category[]; openEditor: (state: EditorState) => void }) {

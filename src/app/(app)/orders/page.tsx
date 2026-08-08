@@ -13,8 +13,10 @@ import type { Order, OrderStatus } from "@/lib/types";
 import {
   Plus, Search, LayoutGrid, List, Columns3, ChevronRight, Calendar,
   UserRound, Loader2, Download, SlidersHorizontal, Phone,
-  Images, AlertTriangle, Check, X, WalletCards,
+  Images, AlertTriangle, Check, X, WalletCards, Car, Ruler,
 } from "lucide-react";
+import { orderCoverPhoto } from "@/lib/order-media";
+import { LayoutImageOverlay } from "@/components/layout-image-viewer";
 
 const statusFilters: { key: string; label: string }[] = [
   { key: "all", label: "Все" },
@@ -60,7 +62,7 @@ function isOverdue(order: Order) {
 }
 
 export default function OrdersPage() {
-  const { orders, clients, cars, users, statuses, updateOrderStatus } = useData();
+  const { orders, clients, cars, users, statuses, updateOrderStatus, cancelOrder } = useData();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [mobileTab, setMobileTab] = useState<MobileTab>("all");
@@ -70,7 +72,11 @@ export default function OrdersPage() {
   const [attentionOnly, setAttentionOnly] = useState(false);
   const [showMobileFilters, setShowMobileFilters] = useState(false);
   const [statusOrderId, setStatusOrderId] = useState<string | null>(null);
+  const [layoutOrderId, setLayoutOrderId] = useState<string | null>(null);
   const [confirmCancel, setConfirmCancel] = useState(false);
+  // При отмене иногда работа уже сделана — тогда подрядчику всё равно платим
+  const [payOksanaOnCancel, setPayOksanaOnCancel] = useState(false);
+  const [payChinaOnCancel, setPayChinaOnCancel] = useState(false);
   const [statusError, setStatusError] = useState("");
 
   const enrichedOrders = useMemo(() => orders.map((order) => ({
@@ -119,10 +125,34 @@ export default function OrdersPage() {
   ])), [enrichedOrders]);
 
   const selectedOrder = enrichedOrders.find((order) => order.id === statusOrderId);
+  const layoutOrder = enrichedOrders.find((order) => order.id === layoutOrderId && order.layoutImage);
 
   const changeStatus = async (orderId: string, status: OrderStatus, closeSheet = false) => {
     setUpdatingId(orderId);
     setStatusError("");
+
+    // Отмена — отдельная операция: возврат клиенту и выбор выплат подрядчикам
+    if (status === "cancelled") {
+      const order = enrichedOrders.find(item => item.id === orderId);
+      const result = await cancelOrder(orderId, {
+        keepSeamstress: payOksanaOnCancel ? (order?.seamstressPayment || 0) : 0,
+        keepChinese: payChinaOnCancel ? (order?.chineseCost || 0) : 0,
+        keepMaterial: 0,
+      });
+      setUpdatingId(null);
+      if (!result.ok) {
+        setStatusError(result.error || "Не удалось отменить заказ. Проверьте интернет.");
+        return;
+      }
+      if (closeSheet) {
+        setStatusOrderId(null);
+        setConfirmCancel(false);
+        setPayOksanaOnCancel(false);
+        setPayChinaOnCancel(false);
+      }
+      return;
+    }
+
     const success = await updateOrderStatus(orderId, status);
     setUpdatingId(null);
     if (!success) {
@@ -267,12 +297,27 @@ export default function OrdersPage() {
                 <div className={cn("h-1", overdue ? "bg-expense" : "bg-transparent")} />
                 <div className="p-3.5 space-y-3">
                   <div className="flex items-start gap-3">
-                    <Link href={`/orders/${order.id}`} className="min-w-0 flex-1">
-                      <p className="text-[11px] text-muted-foreground">№ {order.number}</p>
-                      <h2 className="mt-0.5 font-bold leading-tight truncate">
-                        {[order.car?.brand, order.car?.model, order.car?.generation].filter(Boolean).join(" ") || "Без автомобиля"}
-                      </h2>
-                      <p className="mt-1 text-sm text-muted-foreground truncate">{order.client?.name || "Клиент не указан"}</p>
+                    <Link href={`/orders/${order.id}`} className="min-w-0 flex-1 flex items-start gap-3">
+                      {/* Обложка заказа — фотография «Вид машины» */}
+                      {orderCoverPhoto(order.photos, order.layoutImage) ? (
+                        <img
+                          src={orderCoverPhoto(order.photos, order.layoutImage)}
+                          alt=""
+                          loading="lazy"
+                          className="h-14 w-14 shrink-0 rounded-md object-cover border border-border bg-background"
+                        />
+                      ) : (
+                        <div className="h-14 w-14 shrink-0 rounded-md border border-dashed border-border flex items-center justify-center bg-background">
+                          <Car className="h-5 w-5 text-muted-foreground/50" />
+                        </div>
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[11px] text-muted-foreground">№ {order.number}</p>
+                        <h2 className="mt-0.5 font-bold leading-tight truncate">
+                          {[order.car?.brand, order.car?.model, order.car?.generation].filter(Boolean).join(" ") || "Без автомобиля"}
+                        </h2>
+                        <p className="mt-1 text-sm text-muted-foreground truncate">{order.client?.name || "Клиент не указан"}</p>
+                      </div>
                     </Link>
                     <button
                       onClick={() => { setStatusOrderId(order.id); setConfirmCancel(false); setStatusError(""); }}
@@ -305,6 +350,16 @@ export default function OrdersPage() {
                         <a href={`tel:${phone}`} className="flex h-9 w-9 items-center justify-center rounded-full border border-border bg-background text-primary" aria-label={`Позвонить ${order.client?.name || "клиенту"}`}>
                           <Phone className="h-4 w-4" />
                         </a>
+                      )}
+                      {/* Раскладка лекал открывается прямо из списка */}
+                      {order.layoutImage && (
+                        <button
+                          onClick={() => setLayoutOrderId(order.id)}
+                          className="flex h-9 items-center gap-1.5 rounded-full border border-primary/40 bg-primary/5 px-3 text-xs font-semibold text-primary"
+                          aria-label={`Раскладка лекал заказа №${order.number}`}
+                        >
+                          <Ruler className="h-4 w-4" />Лекала
+                        </button>
                       )}
                       <Link href={`/orders/${order.id}`} className="flex h-9 items-center gap-1.5 rounded-full border border-border bg-background px-3 text-xs font-semibold">
                         <Images className="h-4 w-4" />{photoCount > 0 ? photoCount : "Фото"}
@@ -414,9 +469,60 @@ export default function OrdersPage() {
             </div>
             {confirmCancel ? (
               <div className="mt-5 rounded-lg border border-expense/40 bg-expense/5 p-4">
-                <div className="flex gap-3"><AlertTriangle className="h-5 w-5 shrink-0 text-expense" /><div><p className="font-bold">Отменить заказ?</p><p className="mt-1 text-sm text-muted-foreground">Заказ перейдёт в архив, а изменение сохранится в истории.</p></div></div>
+                <div className="flex gap-3">
+                  <AlertTriangle className="h-5 w-5 shrink-0 text-expense" />
+                  <div>
+                    <p className="font-bold">Отменить заказ?</p>
+                    <p className="mt-1 text-sm text-muted-foreground">Заказ уйдёт в отменённые, изменение сохранится в истории.</p>
+                  </div>
+                </div>
+
+                {selectedOrder.paid > 0 && (
+                  <p className="mt-3 rounded-md bg-background p-2.5 text-sm">
+                    Клиенту вернётся <span className="font-semibold text-expense">{formatCurrency(selectedOrder.paid)}</span> — спишется из кассы автоматически.
+                  </p>
+                )}
+
+                {(selectedOrder.seamstressPayment > 0 || (selectedOrder.chineseCost || 0) > 0) && (
+                  <div className="mt-3 rounded-md border border-border bg-background p-3">
+                    <p className="text-sm font-medium">Кому всё равно платим?</p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      Отметьте, если работа уже сделана. Неотмеченное вернётся в кассу.
+                    </p>
+                    <div className="mt-2.5 space-y-2">
+                      {selectedOrder.seamstressPayment > 0 && (
+                        <label className="flex items-center gap-2.5 text-sm cursor-pointer">
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4 accent-[#ADD256]"
+                            checked={payOksanaOnCancel}
+                            onChange={e => setPayOksanaOnCancel(e.target.checked)}
+                          />
+                          <span className="flex-1">Оксане</span>
+                          <span className="font-semibold">{formatCurrency(selectedOrder.seamstressPayment)}</span>
+                        </label>
+                      )}
+                      {(selectedOrder.chineseCost || 0) > 0 && (
+                        <label className="flex items-center gap-2.5 text-sm cursor-pointer">
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4 accent-[#F59E0B]"
+                            checked={payChinaOnCancel}
+                            onChange={e => setPayChinaOnCancel(e.target.checked)}
+                          />
+                          <span className="flex-1">Китайцам</span>
+                          <span className="font-semibold">{formatCurrency(selectedOrder.chineseCost || 0)}</span>
+                        </label>
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 {statusError && <p className="mt-3 text-sm text-expense">{statusError}</p>}
-                <div className="mt-4 flex gap-2"><Button variant="outline" className="flex-1" onClick={() => setConfirmCancel(false)}>Назад</Button><Button className="flex-1 bg-expense text-white hover:bg-expense/90" disabled={updatingId === selectedOrder.id} onClick={() => void changeStatus(selectedOrder.id, "cancelled", true)}>{updatingId === selectedOrder.id ? <Loader2 className="h-4 w-4 animate-spin" /> : "Отменить"}</Button></div>
+                <div className="mt-4 flex gap-2">
+                  <Button variant="outline" className="flex-1" onClick={() => { setConfirmCancel(false); setPayOksanaOnCancel(false); setPayChinaOnCancel(false); }}>Назад</Button>
+                  <Button className="flex-1 bg-expense text-white hover:bg-expense/90" disabled={updatingId === selectedOrder.id} onClick={() => void changeStatus(selectedOrder.id, "cancelled", true)}>{updatingId === selectedOrder.id ? <Loader2 className="h-4 w-4 animate-spin" /> : "Отменить"}</Button>
+                </div>
               </div>
             ) : (
               <div className="mt-4 space-y-2">
@@ -429,6 +535,15 @@ export default function OrdersPage() {
             )}
           </div>
         </div>
+      )}
+
+      {/* Просмотр раскладки лекал из списка заказов */}
+      {layoutOrder && (
+        <LayoutImageOverlay
+          url={layoutOrder.layoutImage!}
+          orderNumber={layoutOrder.number}
+          onClose={() => setLayoutOrderId(null)}
+        />
       )}
     </div>
   );

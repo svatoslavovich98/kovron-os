@@ -166,6 +166,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           return { success: false, error: "Учётная запись отключена" };
         }
 
+        // Сотрудник может числиться в работе (его назначают исполнителем
+        // и ему считаются выплаты), но не иметь доступа в приложение
+        if (profile.can_login === false) {
+          await sb.auth.signOut();
+          return { success: false, error: "Для этой учётной записи вход в приложение закрыт" };
+        }
+
         const u: User = {
           id: profile.id,
           name: profile.name,
