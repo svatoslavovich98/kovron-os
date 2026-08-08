@@ -176,6 +176,18 @@ export function getCsjBrandName(makeZh: string) {
 export function getCsjModelName(modelZh: string) {
   if (csjModelNames[modelZh]) return csjModelNames[modelZh];
   const withoutSeries = modelZh.replace(/系列$/u, "").trim();
+  if (/^[a-zA-Z0-9]/u.test(withoutSeries) && /[\u3400-\u9fff]/u.test(withoutSeries)) {
+    const latinParts = withoutSeries
+      .split(/[\u3400-\u9fff（）()，、]+/u)
+      .map((part) => part.replace(/^\/+|\/+$/gu, "").trim())
+      .filter((part) => /^[a-zA-Z0-9]/u.test(part));
+    if (latinParts.length) {
+      const latinModel = latinParts.join(" ").replace(/\s+/gu, " ");
+      return /新能源/u.test(withoutSeries)
+        ? `${latinModel} (гибрид/электро)`
+        : latinModel;
+    }
+  }
   const latinName = withoutSeries
     .replace(/[（(][\u3400-\u9fff\s]+[）)]/gu, "")
     .replace(/\/[\u3400-\u9fff]+$/u, "")
