@@ -8,7 +8,7 @@ import {
   Home, ShoppingBag, Factory, Wallet, BarChart3,
   Users, Settings, ChevronRight, Plus, ArrowLeftRight,
   TrendingUp, TrendingDown, LogOut, Bell, User,
-  CreditCard, BookOpen, X, Menu, GraduationCap,
+  CreditCard, BookOpen, X, Menu, GraduationCap, Globe2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Avatar } from "@/components/ui/avatar";
@@ -22,6 +22,7 @@ const mainNav = [
   { href: "/analytics", label: "Аналитика", icon: BarChart3 },
   { href: "/clients", label: "Клиенты", icon: Users },
   { href: "/templates", label: "Лекала", icon: BookOpen },
+  { href: "/china-catalog", label: "Китайский каталог", icon: Globe2 },
   { href: "/guide", label: "Инструкция", icon: GraduationCap },
   { href: "/profile", label: "Профиль", icon: User },
 ];
@@ -242,6 +243,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               { href: "/analytics", label: "Аналитика", icon: BarChart3 },
               { href: "/clients", label: "Клиенты", icon: Users },
               { href: "/templates", label: "Лекала", icon: BookOpen },
+              { href: "/china-catalog", label: "Китайский каталог", icon: Globe2 },
               { href: "/guide", label: "Инструкция", icon: GraduationCap },
               { href: "/profile", label: "Профиль", icon: User },
               ...(isAdmin ? [{ href: "/admin", label: "Админка", icon: Settings }] : []),
