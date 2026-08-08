@@ -313,9 +313,12 @@ export default function OrdersPage() {
                       )}
                       <div className="min-w-0 flex-1">
                         <p className="text-[11px] text-muted-foreground">№ {order.number}</p>
-                        <h2 className="mt-0.5 font-bold leading-tight truncate">
-                          {[order.car?.brand, order.car?.model, order.car?.generation].filter(Boolean).join(" ") || "Без автомобиля"}
-                        </h2>
+                        <div className="mt-0.5 flex items-center gap-2">
+                          <h2 className="min-w-0 truncate font-bold leading-tight">
+                            {[order.car?.brand, order.car?.model, order.car?.generation].filter(Boolean).join(" ") || "Без автомобиля"}
+                          </h2>
+                          {order.car?.year && <span className="shrink-0 rounded-md bg-primary/15 px-2 py-0.5 text-sm font-extrabold text-primary">{order.car.year}</span>}
+                        </div>
                         <p className="mt-1 text-sm text-muted-foreground truncate">{order.client?.name || "Клиент не указан"}</p>
                         <p className="mt-1 text-[10px] text-muted-foreground">
                           Создал: {order.creator?.name || "не указан"} · {formatDateTime(order.createdAt)}
@@ -388,7 +391,7 @@ export default function OrdersPage() {
                   <div className="flex items-center gap-3 p-3 rounded-md bg-card border border-border hover:border-primary/30 transition-colors">
                     <div className="h-3 w-3 rounded-full shrink-0" style={{ backgroundColor: statusConfig?.color }} />
                     <span className="text-sm font-medium w-20 shrink-0 text-muted-foreground">№{order.number}</span>
-                    <span className="text-sm font-medium flex-1 truncate">{order.car?.brand} {order.car?.model}</span>
+                    <span className="text-sm font-medium flex-1 truncate">{order.car?.brand} {order.car?.model}{order.car?.year ? ` · ${order.car.year}` : ""}</span>
                     <span className="text-sm text-muted-foreground hidden sm:block">{order.client?.name}</span>
                     <span className="text-xs text-muted-foreground hidden md:block">Создал: {order.creator?.name || "не указан"} · {formatDateTime(order.createdAt)}</span>
                     <span className="text-sm font-semibold w-24 text-right">{formatCurrency(order.totalPrice)}</span>
@@ -418,7 +421,10 @@ export default function OrdersPage() {
                         </div>
                       </div>
                       <div>
-                        <h3 className="font-semibold">{order.car?.brand} {order.car?.model}{order.car?.generation ? ` ${order.car.generation}` : ""}</h3>
+                        <div className="flex items-center gap-2">
+                          <h3 className="min-w-0 font-semibold">{order.car?.brand} {order.car?.model}{order.car?.generation ? ` ${order.car.generation}` : ""}</h3>
+                          {order.car?.year && <span className="shrink-0 rounded-md bg-primary/15 px-2 py-0.5 text-sm font-extrabold text-primary">{order.car.year}</span>}
+                        </div>
                         <p className="text-sm text-muted-foreground mt-0.5">{order.client?.name}</p>
                       </div>
                       {order.desiredDate && <div className="flex items-center gap-1.5 text-xs text-muted-foreground"><Calendar className="h-3.5 w-3.5" />Срок: {formatDate(order.desiredDate)}</div>}
@@ -467,7 +473,7 @@ export default function OrdersPage() {
       {selectedOrder && (
         <div className="lg:hidden fixed inset-0 z-[80] flex items-end" role="dialog" aria-modal="true" aria-label="Изменить статус заказа">
           <button className="absolute inset-0 bg-black/55 backdrop-blur-sm" onClick={() => { setStatusOrderId(null); setConfirmCancel(false); }} aria-label="Закрыть выбор статуса" />
-          <div className="relative max-h-[82vh] w-full overflow-y-auto rounded-t-2xl border-t border-border bg-card p-4 pb-24 shadow-2xl">
+          <div className="app-dialog-height relative w-full overflow-y-auto rounded-t-2xl border-t border-border bg-card p-4 pb-24 shadow-2xl">
             <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-border" />
             <div className="flex items-start justify-between gap-3">
               <div><p className="text-xs text-muted-foreground">Заказ №{selectedOrder.number}</p><h2 className="text-lg font-bold">Изменить статус</h2></div>

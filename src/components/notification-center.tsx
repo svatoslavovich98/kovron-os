@@ -255,7 +255,7 @@ export function NotificationCenter() {
       </button>
 
       {open && (
-        <div className="fixed sm:absolute z-[80] top-16 sm:top-11 left-3 right-3 sm:left-auto sm:right-0 sm:w-[390px] max-h-[70vh] overflow-hidden rounded-lg border border-border bg-card shadow-2xl animate-scale-in">
+        <div className="fixed sm:absolute z-[80] top-16 sm:top-11 left-3 right-3 sm:left-auto sm:right-0 sm:w-[390px] max-h-[70dvh] overflow-hidden rounded-lg border border-border bg-card shadow-2xl animate-scale-in">
           <div className="flex items-center justify-between gap-3 p-4 border-b border-border">
             <div>
               <h2 className="font-semibold">Уведомления</h2>
@@ -293,7 +293,7 @@ export function NotificationCenter() {
             </div>
           )}
 
-          <div className="overflow-y-auto max-h-[calc(70vh-72px)]">
+          <div className="overflow-y-auto max-h-[calc(70dvh-72px)]">
             {items.length === 0 ? (
               <div className="px-6 py-12 text-center">
                 <Bell className="h-8 w-8 mx-auto text-muted-foreground/50 mb-3" />

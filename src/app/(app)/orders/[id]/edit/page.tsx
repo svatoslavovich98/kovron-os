@@ -119,8 +119,8 @@ export default function EditOrderPage({ params }: { params: { id: string } }) {
     setMessage(null);
   };
 
-  const applyCatalogCar = (brand: string, model: string) => {
-    setForm(prev => ({ ...prev, carBrand: brand, carModel: model }));
+  const applyCatalogCar = (brand: string, model: string, suggestedYear?: number) => {
+    setForm(prev => ({ ...prev, carBrand: brand, carModel: model, carYear: suggestedYear ? String(suggestedYear) : prev.carYear }));
     setDirty(true);
     setMessage(null);
   };

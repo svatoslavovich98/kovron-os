@@ -173,7 +173,10 @@ export default function ProductionPage() {
                                   <CardContent className="p-3 space-y-2.5">
                                     <div className="flex items-start gap-2">
                                       <Link href={`/orders/${order.id}`} className="min-w-0 flex-1 hover:text-primary transition-colors">
-                                        <p className="font-semibold text-sm truncate">{car?.brand} {car?.model}</p>
+                                        <div className="flex items-center gap-1.5">
+                                          <p className="min-w-0 truncate text-sm font-semibold">{car?.brand} {car?.model}</p>
+                                          {car?.year && <span className="shrink-0 rounded bg-primary/15 px-1.5 py-0.5 text-xs font-extrabold text-primary">{car.year}</span>}
+                                        </div>
                                         <p className="text-xs text-muted-foreground truncate">№{order.number} · {client?.name}</p>
                                       </Link>
                                       <button

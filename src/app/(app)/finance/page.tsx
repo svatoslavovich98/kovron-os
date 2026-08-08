@@ -535,7 +535,7 @@ export default function FinancePage() {
         <div className="fixed inset-0 z-[70] flex items-end lg:items-center justify-center" onClick={() => setModal(null)}>
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
           <div
-            className="relative w-full max-w-lg mx-0 lg:mx-4 rounded-t-2xl lg:rounded-lg bg-card border border-border p-5 animate-fade-in max-h-[85vh] overflow-y-auto"
+            className="app-dialog-height relative w-full max-w-lg mx-0 lg:mx-4 rounded-t-2xl lg:rounded-lg bg-card border border-border p-5 animate-fade-in overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between mb-4">

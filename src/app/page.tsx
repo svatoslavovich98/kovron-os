@@ -20,7 +20,7 @@ export default function HomePage() {
   }, [user, loading, router]);
 
   return (
-    <div className="flex h-screen items-center justify-center bg-background">
+    <div className="app-viewport flex items-center justify-center bg-background">
       <div className="flex flex-col items-center gap-3">
         <div className="h-12 w-12 rounded-xl bg-primary flex items-center justify-center">
           <span className="text-primary-foreground font-bold text-lg">K</span>

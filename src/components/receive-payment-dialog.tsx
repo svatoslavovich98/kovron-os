@@ -51,7 +51,7 @@ export function ReceivePaymentDialog({ order }: { order: Order }) {
       {open && (
         <div className="fixed inset-0 z-[90] flex items-end sm:items-center justify-center p-0 sm:p-4">
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => !saving && setOpen(false)} />
-          <div className="relative w-full sm:max-w-lg max-h-[92vh] overflow-y-auto rounded-t-lg sm:rounded-lg border border-border bg-card p-5 shadow-2xl animate-slide-up sm:animate-scale-in">
+          <div className="app-dialog-height relative w-full sm:max-w-lg overflow-y-auto rounded-t-lg sm:rounded-lg border border-border bg-card p-5 shadow-2xl animate-slide-up sm:animate-scale-in">
             <div className="flex items-start justify-between gap-3 mb-5">
               <div><h2 className="text-lg font-bold">Получить оплату</h2><p className="text-sm text-muted-foreground">Заказ №{order.number} · осталось {formatCurrency(order.remaining)}</p></div>
               <button onClick={() => setOpen(false)} disabled={saving} className="p-2 rounded-sm hover:bg-background"><X className="h-4 w-4" /></button>

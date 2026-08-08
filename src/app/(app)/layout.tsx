@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Avatar } from "@/components/ui/avatar";
+import { VIEWPORT_EVENT } from "@/components/viewport-sync";
 
 const mainNav = [
   { href: "/dashboard", label: "Главная", icon: Home },
@@ -50,9 +51,24 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     if (!loading && user?.role === "seamstress") router.replace("/seamstress");
   }, [user, loading, router]);
 
+  useEffect(() => {
+    const restoreScroll = () => {
+      const container = scrollContainerRef.current;
+      if (!container) return;
+      const top = container.scrollTop;
+      container.scrollLeft = 0;
+      requestAnimationFrame(() => {
+        const maxTop = Math.max(0, container.scrollHeight - container.clientHeight);
+        container.scrollTo({ left: 0, top: Math.min(top, maxTop), behavior: "auto" });
+      });
+    };
+    document.addEventListener(VIEWPORT_EVENT, restoreScroll);
+    return () => document.removeEventListener(VIEWPORT_EVENT, restoreScroll);
+  }, []);
+
   if (loading || !user || user.role === "seamstress") {
     return (
-      <div className="flex h-screen items-center justify-center bg-background">
+      <div className="app-viewport flex items-center justify-center bg-background">
         <div className="skeleton h-8 w-32 rounded" />
       </div>
     );
@@ -61,7 +77,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const isAdmin = user.role === "admin";
 
   return (
-    <div className="flex h-screen bg-background overflow-hidden">
+    <div className="app-viewport flex bg-background">
       {/* Desktop Sidebar */}
       <aside className="hidden lg:flex flex-col w-64 border-r border-border bg-card shrink-0">
         <div className="p-5 border-b border-border">
@@ -132,11 +148,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       </aside>
 
       {/* Main content */}
-      <main className="flex-1 flex flex-col min-h-0 overflow-hidden">
+      <main className="flex-1 min-w-0 flex flex-col min-h-0 overflow-hidden">
         <div
           ref={scrollContainerRef}
           onScroll={(event) => setShowScrollTop(event.currentTarget.scrollTop > 500)}
-          className="flex-1 overflow-y-auto pb-20 lg:pb-0"
+          className="app-scroll app-mobile-content flex-1 overflow-y-auto pb-20 lg:pb-0"
         >
           {children}
         </div>
@@ -155,15 +171,15 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       )}
 
       {/* Mobile bottom nav */}
-      <nav className="lg:hidden fixed bottom-0 left-0 right-0 border-t border-border glass z-50">
-        <div className="flex items-center justify-around h-16 px-2 safe-bottom">
+      <nav className="app-mobile-nav app-fixed-safe lg:hidden fixed bottom-0 border-t border-border glass z-50">
+        <div className="app-mobile-nav-inner flex items-center justify-around h-16 px-2 safe-bottom">
           {bottomNav.map((item) => {
             if (item.isAction) {
               return (
                 <button
                   key="add"
                   onClick={() => { setShowAddMenu(!showAddMenu); setShowMoreMenu(false); }}
-                  className="flex items-center justify-center w-14 h-14 -mt-5 rounded-full bg-primary text-primary-foreground shadow-lg active:scale-95 transition-transform"
+                  className="app-mobile-action flex items-center justify-center w-14 h-14 -mt-5 rounded-full bg-primary text-primary-foreground shadow-lg active:scale-95 transition-transform"
                 >
                   <Plus className="h-7 w-7" />
                 </button>
@@ -180,7 +196,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                   )}
                 >
                   <Menu className="h-5 w-5" />
-                  <span>{item.label}</span>
+                  <span className="app-mobile-nav-label">{item.label}</span>
                 </button>
               );
             }
@@ -196,7 +212,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 )}
               >
                 <item.icon className="h-5 w-5" />
-                <span>{item.label}</span>
+                <span className="app-mobile-nav-label">{item.label}</span>
               </Link>
             );
           })}
@@ -208,7 +224,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <div className="lg:hidden fixed inset-0 z-[60] flex items-end justify-center" onClick={() => setShowAddMenu(false)}>
           <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
           <div
-            className="relative w-full max-w-lg mx-4 mb-20 rounded-lg bg-card border border-border p-4 animate-fade-in"
+            className="app-mobile-sheet relative w-full max-w-lg mx-4 mb-20 rounded-lg bg-card border border-border p-4 animate-fade-in"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="grid grid-cols-2 gap-3">
@@ -254,7 +270,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <div className="lg:hidden fixed inset-0 z-[60] flex items-end justify-center" onClick={() => setShowMoreMenu(false)}>
           <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
           <div
-            className="relative w-full max-w-lg mx-4 mb-20 rounded-lg bg-card border border-border p-2 animate-fade-in"
+            className="app-mobile-sheet relative w-full max-w-lg mx-4 mb-20 max-h-[calc(var(--app-height)-6rem)] overflow-y-auto rounded-lg bg-card border border-border p-2 animate-fade-in"
             onClick={(e) => e.stopPropagation()}
           >
             {[

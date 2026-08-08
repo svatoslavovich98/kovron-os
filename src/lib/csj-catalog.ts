@@ -336,6 +336,7 @@ export function getCsjSearchText(vehicle: CsjCatalogVehicle) {
     vehicle.manufacturerZh,
     vehicle.modelZh,
     getCsjModelName(vehicle.modelZh),
+    getCsjModelEnglishName(vehicle.modelZh),
     vehicle.yearLabel,
     ...(vehicle.years || []).map(String),
     brand?.en,

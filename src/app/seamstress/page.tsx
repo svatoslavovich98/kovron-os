@@ -161,6 +161,7 @@ export default function SeamstressCabinet() {
                           {order.car?.brand} {order.car?.model}
                           {order.car?.generation ? ` ${order.car.generation}` : ""}
                         </h3>
+                        {order.car?.year && <span className="mt-1 inline-flex rounded-md bg-primary/15 px-2.5 py-0.5 text-base font-extrabold text-primary">{order.car.year}</span>}
                         <p className="text-sm text-muted-foreground">
                           {order.kitTypes.map((k) => kitLabels[k] || k).join(", ")}
                         </p>

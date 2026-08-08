@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { CheckCircle2, Image as ImageIcon, Loader2, ScanLine } from "lucide-react";
+import { CheckCircle2, ChevronRight, Image as ImageIcon, ListFilter, Loader2, ScanLine, Search } from "lucide-react";
 
 interface CatalogOption {
   value: string;
@@ -13,11 +13,15 @@ interface CatalogMatch {
   code: string;
   make: string;
   modelEn: string;
+  makeZh: string;
+  modelZh: string;
   yearLabel: string;
+  years: number[];
   imagePath: string;
   technologyImagePaths: string[];
   sourceUrl: string;
   category: string;
+  powertrain?: string;
 }
 
 export interface CatalogMediaMatch {
@@ -32,7 +36,7 @@ interface CarCatalogPickerProps {
   brand: string;
   model: string;
   year?: string;
-  onCarChange: (brand: string, model: string) => void;
+  onCarChange: (brand: string, model: string, suggestedYear?: number) => void;
   onMediaFound: (match: CatalogMediaMatch | null) => void;
 }
 
@@ -48,6 +52,10 @@ function normalize(value: string) {
 }
 
 export function CarCatalogPicker({ brand, model, year, onCarChange, onMediaFound }: CarCatalogPickerProps) {
+  const [mode, setMode] = useState<"search" | "lists">("search");
+  const [query, setQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<CatalogMatch[]>([]);
+  const [searching, setSearching] = useState(false);
   const [makes, setMakes] = useState<CatalogOption[]>([]);
   const [models, setModels] = useState<CatalogOption[]>([]);
   const [makeZh, setMakeZh] = useState("");
@@ -66,6 +74,33 @@ export function CarCatalogPicker({ brand, model, year, onCarChange, onMediaFound
       .finally(() => setLoadingOptions(false));
     return () => controller.abort();
   }, []);
+
+  useEffect(() => {
+    const trimmed = query.trim();
+    if (trimmed.length < 2) {
+      setSearchResults([]);
+      setSearching(false);
+      return;
+    }
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      setSearching(true);
+      try {
+        const params = new URLSearchParams({ q: trimmed, limit: "12" });
+        const response = await fetch(`/api/csj-catalog?${params}`, { signal: controller.signal });
+        const data = await response.json() as { results?: CatalogMatch[] };
+        setSearchResults(data.results || []);
+      } catch (error) {
+        if ((error as Error).name !== "AbortError") setSearchResults([]);
+      } finally {
+        if (!controller.signal.aborted) setSearching(false);
+      }
+    }, 250);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [query]);
 
   useEffect(() => {
     if (!makes.length || makeZh || !brand) return;
@@ -154,9 +189,82 @@ export function CarCatalogPicker({ brand, model, year, onCarChange, onMediaFound
     onCarChange(selectedMake?.label || brand, selectedModel?.label || "");
   };
 
+  const selectSearchResult = (result: CatalogMatch) => {
+    const requestedYear = Number(query.match(/\b(?:19|20)\d{2}\b/u)?.[0] || 0);
+    const suggestedYear = requestedYear && result.years.includes(requestedYear)
+      ? requestedYear
+      : result.years.length === 1 ? result.years[0] : undefined;
+    setMakeZh(result.makeZh);
+    setModelZh(result.modelZh);
+    setMatch(result);
+    setQuery(`${result.make} ${result.modelEn}${suggestedYear ? ` ${suggestedYear}` : ""}`);
+    setSearchResults([]);
+    onCarChange(result.make, result.modelEn, suggestedYear);
+    onMediaFoundRef.current({
+      carImageUrl: result.imagePath ? imageUrl(result.imagePath, "carview") : undefined,
+      technologyImageUrl: result.technologyImagePaths?.[0] ? imageUrl(result.technologyImagePaths[0]) : undefined,
+      code: result.code,
+      yearLabel: result.yearLabel,
+      sourceUrl: result.sourceUrl,
+    });
+  };
+
   return (
     <div className="space-y-3">
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+      <div className="grid grid-cols-2 gap-1 rounded-lg border border-border bg-background p-1">
+        <button type="button" onClick={() => setMode("search")} className={`flex h-10 items-center justify-center gap-2 rounded-md text-sm font-medium transition-colors ${mode === "search" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground"}`}>
+          <Search className="h-4 w-4" />Быстрый поиск
+        </button>
+        <button type="button" onClick={() => setMode("lists")} className={`flex h-10 items-center justify-center gap-2 rounded-md text-sm font-medium transition-colors ${mode === "lists" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground"}`}>
+          <ListFilter className="h-4 w-4" />Из списка
+        </button>
+      </div>
+
+      {mode === "search" && (
+        <div className="relative">
+          <label className="block">
+            <span className="mb-1 block text-sm text-muted-foreground">Начните вводить марку, модель или год</span>
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <input
+                value={query}
+                onChange={event => setQuery(event.target.value)}
+                placeholder="Например: Lexus GX 2019"
+                autoComplete="off"
+                className="h-12 w-full rounded-md border border-border bg-background pl-10 pr-10 text-base outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
+              />
+              {searching && <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-primary" />}
+            </div>
+          </label>
+          {query.trim().length >= 2 && !searching && searchResults.length > 0 && (
+            <div className="absolute left-0 right-0 top-full z-30 mt-1 max-h-[min(360px,45dvh)] overflow-y-auto rounded-lg border border-border bg-card p-1 shadow-2xl">
+              {searchResults.map(result => (
+                <button
+                  type="button"
+                  key={`${result.code}-${result.yearLabel}`}
+                  onClick={() => selectSearchResult(result)}
+                  className="flex w-full items-center gap-3 rounded-md p-2.5 text-left transition-colors hover:bg-background active:bg-primary/10"
+                >
+                  <div className="flex h-12 w-16 shrink-0 items-center justify-center overflow-hidden rounded border border-border bg-white">
+                    {result.imagePath ? <img src={imageUrl(result.imagePath)} alt="" className="h-full w-full object-contain" /> : <ImageIcon className="h-5 w-5 text-muted-foreground" />}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-semibold">{result.make} {result.modelEn}</p>
+                    <p className="mt-0.5 truncate text-xs text-muted-foreground">{result.yearLabel || "Годы не указаны"}{result.powertrain ? ` · ${result.powertrain}` : ""}</p>
+                  </div>
+                  <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+                </button>
+              ))}
+            </div>
+          )}
+          {query.trim().length >= 2 && !searching && searchResults.length === 0 && (
+            <p className="mt-2 rounded-md border border-border bg-background p-3 text-xs text-muted-foreground">Совпадений пока нет. Проверьте написание или выберите автомобиль через списки.</p>
+          )}
+          {query.trim().length < 2 && <p className="mt-2 text-[11px] text-muted-foreground">Поиск понимает английские названия и год выпуска. Введите хотя бы две буквы.</p>}
+        </div>
+      )}
+
+      {mode === "lists" && <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <label className="block">
           <span className="mb-1 block text-sm text-muted-foreground">Марка</span>
           <select value={makeZh} onChange={event => selectMake(event.target.value)} disabled={loadingOptions} className="h-11 w-full rounded-md border border-border bg-background px-3 text-sm font-medium outline-none focus:border-primary disabled:opacity-60">
@@ -171,7 +279,7 @@ export function CarCatalogPicker({ brand, model, year, onCarChange, onMediaFound
             {models.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}
           </select>
         </label>
-      </div>
+      </div>}
 
       {(brand || model) && !makeZh && (
         <p className="rounded-md bg-secondary/50 p-2.5 text-xs text-muted-foreground">Текущий автомобиль: <span className="font-semibold text-foreground">{brand} {model}</span>. Выберите его из каталога, только если хотите изменить данные.</p>

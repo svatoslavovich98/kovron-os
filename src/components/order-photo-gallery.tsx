@@ -38,7 +38,7 @@ export function OrderPhotoGallery({ title, photos }: { title: string; photos: st
           <button className="absolute top-4 right-4 p-2 rounded-full bg-white/10 text-white" onClick={() => setActive(null)} aria-label="Закрыть"><X className="h-6 w-6" /></button>
           {photos.length > 1 && <button className="absolute left-3 sm:left-6 p-2 rounded-full bg-white/10 text-white" onClick={event => { event.stopPropagation(); setActive((active - 1 + photos.length) % photos.length); }}><ChevronLeft className="h-7 w-7" /></button>}
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={photos[active]} alt={`${title} ${active + 1}`} className="max-h-[90vh] max-w-[90vw] object-contain" onClick={event => event.stopPropagation()} />
+          <img src={photos[active]} alt={`${title} ${active + 1}`} className="max-h-[90dvh] max-w-[90vw] object-contain" onClick={event => event.stopPropagation()} />
           {photos.length > 1 && <button className="absolute right-3 sm:right-6 p-2 rounded-full bg-white/10 text-white" onClick={event => { event.stopPropagation(); setActive((active + 1) % photos.length); }}><ChevronRight className="h-7 w-7" /></button>}
           <span className="absolute bottom-4 text-xs text-white/75">{active + 1} из {photos.length}</span>
         </div>

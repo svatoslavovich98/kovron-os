@@ -17,14 +17,14 @@ export default function SeamstressLayout({ children }: { children: React.ReactNo
 
   if (loading || !user) {
     return (
-      <div className="flex h-screen items-center justify-center bg-background">
+      <div className="app-viewport flex items-center justify-center bg-background">
         <div className="skeleton h-8 w-32 rounded" />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="app-viewport overflow-y-auto bg-background">
       <header className="sticky top-0 z-50 border-b border-border glass px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-2.5">
           <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-primary/20 to-primary/5 border border-primary/20 flex items-center justify-center">

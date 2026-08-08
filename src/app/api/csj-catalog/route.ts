@@ -34,6 +34,7 @@ const preparedModels = catalog.models.map((model) => ({
     model.makeZh,
     model.manufacturerZh,
     getCsjModelName(model.modelZh),
+    getCsjModelEnglishName(model.modelZh),
     model.modelZh,
     ...(model.aliases || []),
   ]

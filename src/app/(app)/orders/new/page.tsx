@@ -139,8 +139,8 @@ export default function NewOrderPage() {
     setSaveError(null);
   };
 
-  const applyCatalogCar = (brand: string, model: string) => {
-    setForm(prev => ({ ...prev, carBrand: brand, carModel: model, existingCarId: "" }));
+  const applyCatalogCar = (brand: string, model: string, suggestedYear?: number) => {
+    setForm(prev => ({ ...prev, carBrand: brand, carModel: model, carYear: suggestedYear ? String(suggestedYear) : prev.carYear, existingCarId: "" }));
     setDirty(true);
     setSaveError(null);
   };

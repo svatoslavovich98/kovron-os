@@ -289,7 +289,7 @@ export default function ChinaCatalogPage() {
           >
             <option value="">Все марки</option>
             {makeOptions.map((item) => (
-              <option key={item.value} value={item.value}>{item.label} — {item.labelZh}</option>
+              <option key={item.value} value={item.value}>{item.label}</option>
             ))}
           </select>
           <select

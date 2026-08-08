@@ -83,7 +83,7 @@ export default function ClientDetailPage({ params }: { params: { id: string } })
               return (
                 <div key={order.id} className="flex items-center gap-2 p-3 rounded-md border border-border hover:border-primary/40 transition-colors">
                   <Link href={`/orders/${order.id}`} className="flex items-center gap-3 flex-1 min-w-0">
-                    <div className="flex-1 min-w-0"><p className="font-medium text-sm truncate">№{order.number} · {car?.brand} {car?.model}</p><p className="text-xs text-muted-foreground">{formatDate(order.createdAt)} · {formatCurrency(order.totalPrice)}</p></div>
+                    <div className="flex-1 min-w-0"><p className="font-medium text-sm truncate">№{order.number} · {car?.brand} {car?.model}{car?.year ? ` · ${car.year}` : ""}</p><p className="text-xs text-muted-foreground">{formatDate(order.createdAt)} · {formatCurrency(order.totalPrice)}</p></div>
                     <Badge style={{ color: status?.color, borderColor: `${status?.color}55` }} variant="outline" className="hidden sm:inline-flex">{status?.label}</Badge>
                     <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
                   </Link>
