@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { OrderPhotoPicker } from "@/components/order-photo-picker";
+import { CarCatalogPicker, type CatalogMediaMatch } from "@/components/car-catalog-picker";
 import { ReceivePaymentDialog } from "@/components/receive-payment-dialog";
 import { PayContractorDialog } from "@/components/pay-contractor-dialog";
 import { useData } from "@/lib/data-context";
@@ -116,6 +117,25 @@ export default function EditOrderPage({ params }: { params: { id: string } }) {
     setForm(prev => ({ ...prev, [key]: value }));
     setDirty(true);
     setMessage(null);
+  };
+
+  const applyCatalogCar = (brand: string, model: string) => {
+    setForm(prev => ({ ...prev, carBrand: brand, carModel: model }));
+    setDirty(true);
+    setMessage(null);
+  };
+
+  const applyCatalogMedia = (match: CatalogMediaMatch | null) => {
+    setForm(prev => ({
+      ...prev,
+      carViewPhotos: match?.carImageUrl
+        ? (!prev.carViewPhotos.length || prev.carViewPhotos[0].includes("/api/csj-image") ? [match.carImageUrl] : prev.carViewPhotos)
+        : prev.carViewPhotos.filter(url => !url.includes("/api/csj-image")),
+      layoutPhotos: match?.technologyImageUrl
+        ? (!prev.layoutPhotos.length || prev.layoutPhotos[0].includes("/api/csj-image") ? [match.technologyImageUrl] : prev.layoutPhotos)
+        : prev.layoutPhotos.filter(url => !url.includes("/api/csj-image")),
+    }));
+    setDirty(true);
   };
 
   const toggleKit = (kit: KitType) => update("kitTypes", form.kitTypes.includes(kit)
@@ -246,9 +266,14 @@ export default function EditOrderPage({ params }: { params: { id: string } }) {
 
       <Card><CardContent className="p-4 space-y-3">
         <h2 className="font-semibold">Автомобиль</h2>
+        <CarCatalogPicker
+          brand={form.carBrand}
+          model={form.carModel}
+          year={form.carYear}
+          onCarChange={applyCatalogCar}
+          onMediaFound={applyCatalogMedia}
+        />
         <div className="grid sm:grid-cols-2 gap-3">
-          <Field label="Марка"><Input value={form.carBrand} onChange={e => update("carBrand", e.target.value)} /></Field>
-          <Field label="Модель"><Input value={form.carModel} onChange={e => update("carModel", e.target.value)} /></Field>
           <Field label="Поколение"><Input value={form.carGeneration} onChange={e => update("carGeneration", e.target.value)} /></Field>
           <Field label="Год"><Input type="number" value={form.carYear} onChange={e => update("carYear", e.target.value)} /></Field>
           <Field label="Кузов"><Input value={form.carBody} onChange={e => update("carBody", e.target.value)} /></Field>

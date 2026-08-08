@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -17,12 +18,17 @@ import { LayoutImageViewer } from "@/components/layout-image-viewer";
 import type { OrderStatus } from "@/lib/types";
 import {
   ArrowLeft, Phone, MessageCircle, Calendar, Clock,
-  User, Wallet, Package, Loader2, ChevronsUpDown, UserRound, Pencil, Printer, CopyPlus,
+  User, Wallet, Package, Loader2, ChevronsUpDown, UserRound, Pencil, Printer, CopyPlus, Trash2, AlertTriangle,
 } from "lucide-react";
 
 export default function OrderDetailPage({ params }: { params: { id: string } }) {
-  const { orders, clients, cars, users, statuses, auditLog, updateOrderStatus } = useData();
+  const router = useRouter();
+  const { orders, clients, cars, users, statuses, auditLog, updateOrderStatus, deleteOrder } = useData();
   const [updatingStatus, setUpdatingStatus] = useState(false);
+  const [showDelete, setShowDelete] = useState(false);
+  const [deleteReason, setDeleteReason] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
   const { id } = params;
   const order = orders.find((o) => o.id === id);
   const client = order ? clients.find((c) => c.id === order.clientId) : null;
@@ -39,6 +45,23 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
     setUpdatingStatus(true);
     await updateOrderStatus(order.id, status);
     setUpdatingStatus(false);
+  };
+
+  const confirmDelete = async () => {
+    if (!order || deleting) return;
+    if (deleteReason.trim().length < 3) {
+      setDeleteError("Коротко укажите причину удаления");
+      return;
+    }
+    setDeleting(true);
+    setDeleteError("");
+    const result = await deleteOrder(order.id, deleteReason.trim());
+    if (!result.ok) {
+      setDeleteError(result.error || "Не удалось удалить заказ");
+      setDeleting(false);
+      return;
+    }
+    router.replace("/orders");
   };
 
   if (!order) {
@@ -86,6 +109,7 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
           <Pencil className="h-4 w-4" />
         </Link>
         <button onClick={() => window.print()} className="print-hide p-2 rounded-sm border border-border bg-card hover:border-primary/40 transition-colors" title="Печать заказа"><Printer className="h-4 w-4" /></button>
+        <button onClick={() => setShowDelete(true)} className="print-hide p-2 rounded-sm border border-expense/30 bg-card text-expense hover:bg-expense/10 transition-colors" title="Удалить ошибочный заказ"><Trash2 className="h-4 w-4" /></button>
       </div>
 
       {/* Client */}
@@ -159,7 +183,7 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
           <div className="space-y-2 text-sm">
             <div className="flex justify-between">
               <span className="text-muted-foreground">Создан</span>
-              <span>{formatDate(order.createdAt)}</span>
+              <span>{formatDateTime(order.createdAt)}</span>
             </div>
             <div className="flex items-center justify-between">
               <span className="text-muted-foreground">Создал заказ</span>
@@ -271,6 +295,44 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
             </div>
           </CardContent>
         </Card>
+      )}
+
+      {showDelete && (
+        <div className="fixed inset-0 z-[190] flex items-end sm:items-center justify-center sm:p-4">
+          <button className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => !deleting && setShowDelete(false)} aria-label="Закрыть" />
+          <div className="relative w-full sm:max-w-md rounded-t-xl sm:rounded-xl border border-border bg-card p-5 shadow-2xl">
+            <div className="flex items-start gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-expense/10 text-expense"><AlertTriangle className="h-5 w-5" /></div>
+              <div>
+                <h2 className="text-lg font-bold">Удалить заказ №{order.number}?</h2>
+                <p className="mt-1 text-sm text-muted-foreground">Заказ исчезнет из рабочих списков, а причина удаления останется в журнале действий. Администратор сможет найти архивную копию в корзине.</p>
+              </div>
+            </div>
+            {order.paid > 0 ? (
+              <div className="mt-4 rounded-md border border-expense/30 bg-expense/10 p-3 text-sm text-expense">
+                Удаление заблокировано: по заказу получено {formatCurrency(order.paid)}. Сначала оформите возврат или исправьте ошибочную оплату.
+              </div>
+            ) : (
+              <label className="mt-4 block">
+                <span className="mb-1.5 block text-sm font-medium">Причина удаления</span>
+                <textarea
+                  value={deleteReason}
+                  onChange={(event) => { setDeleteReason(event.target.value); setDeleteError(""); }}
+                  placeholder="Например: заказ создан по ошибке или продублирован"
+                  rows={3}
+                  className="w-full resize-none rounded-md border border-border bg-background p-3 text-sm outline-none focus:border-primary"
+                />
+              </label>
+            )}
+            {deleteError && <p className="mt-3 text-sm text-expense">{deleteError}</p>}
+            <div className="mt-5 grid grid-cols-2 gap-3">
+              <Button variant="outline" onClick={() => setShowDelete(false)} disabled={deleting}>Отмена</Button>
+              <Button onClick={() => void confirmDelete()} disabled={deleting || order.paid > 0} className="bg-expense text-white hover:bg-expense/90">
+                {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <><Trash2 className="mr-2 h-4 w-4" />Удалить</>}
+              </Button>
+            </div>
+          </div>
+        </div>
       )}
 
       {orderEdits.length > 0 && (

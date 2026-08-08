@@ -3,6 +3,7 @@ import catalogJson from "@/data/csj-catalog.json";
 import {
   getCsjBrandName,
   getCsjDescription,
+  getCsjModelEnglishName,
   getCsjModelName,
   getCsjPowertrain,
   getCsjSearchText,
@@ -57,7 +58,7 @@ for (const vehicle of catalog.vehicles) {
   if (!models.some((item) => item.value === vehicle.modelZh)) {
     models.push({
       value: vehicle.modelZh,
-      label: getCsjModelName(vehicle.modelZh),
+      label: getCsjModelEnglishName(vehicle.modelZh),
       labelZh: vehicle.modelZh,
     });
     modelOptionsByMake.set(vehicle.makeZh, models);
@@ -94,6 +95,7 @@ function toResult(vehicle: CsjCatalogVehicle) {
     make: getCsjBrandName(vehicle.makeZh),
     makeZh: vehicle.makeZh,
     model: getCsjModelName(vehicle.modelZh),
+    modelEn: getCsjModelEnglishName(vehicle.modelZh),
     modelZh: vehicle.modelZh,
     manufacturerZh: vehicle.manufacturerZh,
     yearLabel: vehicle.yearLabel,

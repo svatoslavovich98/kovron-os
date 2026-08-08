@@ -7,7 +7,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Avatar } from "@/components/ui/avatar";
-import { formatCurrency, formatDate, cn } from "@/lib/utils";
+import { formatCurrency, formatDate, formatDateTime, cn } from "@/lib/utils";
 import { useData } from "@/lib/data-context";
 import type { Order, OrderStatus } from "@/lib/types";
 import {
@@ -317,6 +317,9 @@ export default function OrdersPage() {
                           {[order.car?.brand, order.car?.model, order.car?.generation].filter(Boolean).join(" ") || "Без автомобиля"}
                         </h2>
                         <p className="mt-1 text-sm text-muted-foreground truncate">{order.client?.name || "Клиент не указан"}</p>
+                        <p className="mt-1 text-[10px] text-muted-foreground">
+                          Создал: {order.creator?.name || "не указан"} · {formatDateTime(order.createdAt)}
+                        </p>
                       </div>
                     </Link>
                     <button
@@ -387,7 +390,7 @@ export default function OrdersPage() {
                     <span className="text-sm font-medium w-20 shrink-0 text-muted-foreground">№{order.number}</span>
                     <span className="text-sm font-medium flex-1 truncate">{order.car?.brand} {order.car?.model}</span>
                     <span className="text-sm text-muted-foreground hidden sm:block">{order.client?.name}</span>
-                    <span className="text-xs text-muted-foreground hidden md:block">Создал: {order.creator?.name || "не указан"}</span>
+                    <span className="text-xs text-muted-foreground hidden md:block">Создал: {order.creator?.name || "не указан"} · {formatDateTime(order.createdAt)}</span>
                     <span className="text-sm font-semibold w-24 text-right">{formatCurrency(order.totalPrice)}</span>
                     <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
                   </div>
@@ -425,7 +428,10 @@ export default function OrdersPage() {
                         {order.remaining > 0 && <div className="flex justify-between text-sm"><span className="text-muted-foreground">Осталось</span><span className="text-expense">{formatCurrency(order.remaining)}</span></div>}
                       </div>
                       {order.assignee && <div className="flex items-center gap-2 pt-1"><Avatar name={order.assignee.name} size="sm" /><span className="text-xs text-muted-foreground">{order.assignee.name}</span></div>}
-                      <div className="flex items-center gap-1.5 text-xs text-muted-foreground"><UserRound className="h-3.5 w-3.5" />Создал: {order.creator?.name || "не указан"}</div>
+                      <div className="flex items-start gap-1.5 text-xs text-muted-foreground">
+                        <UserRound className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                        <span>Создал: <span className="font-medium text-foreground">{order.creator?.name || "не указан"}</span><br />{formatDateTime(order.createdAt)}</span>
+                      </div>
                     </CardContent>
                   </Card>
                 </Link>

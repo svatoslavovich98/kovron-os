@@ -117,6 +117,8 @@ export interface AppData {
   }) => Promise<{ id: string; number: string; clientId: string; carId: string } | null>;
   updateOrder: (id: string, updates: Partial<Order>) => Promise<boolean>;
   updateOrderStatus: (id: string, status: OrderStatus) => Promise<boolean>;
+  /** Удаляет ошибочно созданный заказ без оплат и сохраняет его копию в корзине. */
+  deleteOrder: (id: string, reason: string) => Promise<{ ok: boolean; error?: string }>;
   createClient: (client: Partial<Client>) => Promise<Client | null>;
   updateClient: (id: string, updates: Partial<Client>) => Promise<boolean>;
   createTransaction: (tx: Partial<Transaction>) => Promise<Transaction | null>;
@@ -532,6 +534,23 @@ function useDemoData(): AppData {
     return true;
   }, []);
 
+  const deleteOrder = useCallback(async (id: string, reason: string) => {
+    const order = orders.find(item => item.id === id);
+    if (!order) return { ok: false, error: "Заказ не найден" };
+    if (order.paid > 0 || transactions.some(item => item.orderId === id)) {
+      return { ok: false, error: "У заказа есть финансовые операции. Сначала оформите возврат или удалите ошибочную оплату." };
+    }
+    setOrders(prev => prev.filter(item => item.id !== id));
+    if (user) {
+      setAuditLog(prev => [{
+        id: `audit_${Date.now()}`, userId: user.id, userName: user.name,
+        action: "order_deleted", details: `Удалён заказ №${order.number}. Причина: ${reason}`,
+        entityType: "order", entityId: id, timestamp: new Date().toISOString(),
+      }, ...prev]);
+    }
+    return { ok: true };
+  }, [orders, transactions, user]);
+
   const createClient = useCallback(async (c: Partial<Client>) => {
     const client = { ...c, id: `client_${Date.now()}`, createdAt: new Date().toISOString() } as Client;
     setClients(prev => [client, ...prev]);
@@ -659,7 +678,7 @@ function useDemoData(): AppData {
     loading: false,
     error: null,
     createOrder, createOrderWithPayment, createFullOrder, updateFullOrder,
-    updateOrder, updateOrderStatus,
+    updateOrder, updateOrderStatus, deleteOrder,
     createClient, updateClient, createTransaction,
     deleteTransaction, updateTransaction, loadOrderMedia,
     createCar, updateCar, addTemplate, refresh,
@@ -1287,6 +1306,57 @@ function useSupabaseData(): AppData {
     return true;
   }, [user, data.orders]);
 
+  const deleteOrder = useCallback(async (id: string, reason: string) => {
+    const sb = getSupabase();
+    if (!sb || !user) return { ok: false, error: "Нет соединения с базой" };
+    const order = data.orders.find(item => item.id === id);
+    if (!order) return { ok: false, error: "Заказ не найден" };
+    if (order.paid > 0 || data.transactions.some(item => item.orderId === id)) {
+      return { ok: false, error: "У заказа есть финансовые операции. Сначала оформите возврат или удалите ошибочную оплату." };
+    }
+
+    const { error: rpcError } = await sb.rpc("delete_order", {
+      p_order_id: id,
+      p_reason: reason.trim() || "Ошибочно созданный заказ",
+    });
+
+    if (rpcError && !/function .*delete_order.* does not exist|schema cache/i.test(rpcError.message || "")) {
+      return { ok: false, error: rpcError.message };
+    }
+
+    // Совместимость с базой, где новая серверная функция ещё не установлена:
+    // для заказа без денег безопасно удаляем зависимые производственные записи.
+    if (rpcError) {
+      const client = data.clients.find(item => item.id === order.clientId);
+      const car = data.cars.find(item => item.id === order.carId);
+      // У администратора эта копия попадёт в корзину. Для редактора политика
+      // базы может запретить архивирование — удалению пустого заказа это не мешает.
+      await sb.from("deleted_records").insert({
+        entity_type: "order", entity_id: id,
+        data: { order, client, car }, deleted_by: user.id,
+        reason: reason.trim() || "Ошибочно созданный заказ",
+      });
+      await sb.from("notifications").update({ order_id: null }).eq("order_id", id);
+      const { error: paymentError } = await sb.from("seamstress_payments").delete().eq("order_id", id);
+      if (paymentError) return { ok: false, error: paymentError.message };
+      const { error: deleteError } = await sb.from("orders").delete().eq("id", id);
+      if (deleteError) return { ok: false, error: deleteError.message };
+      await sb.from("audit_log").insert({
+        user_id: user.id, user_name: user.name, action: "order_deleted",
+        details: `Удалён заказ №${order.number}. Причина: ${reason.trim() || "не указана"}`,
+        entity_type: "order", entity_id: id,
+      });
+    }
+
+    setData(prev => ({
+      ...prev,
+      orders: prev.orders.filter(item => item.id !== id),
+      seamstressPayments: prev.seamstressPayments.filter(item => item.orderId !== id),
+      notifications: prev.notifications.map(item => item.orderId === id ? { ...item, orderId: undefined } : item),
+    }));
+    return { ok: true };
+  }, [data.orders, data.transactions, data.clients, data.cars, user]);
+
   const createClient = useCallback(async (c: Partial<Client>): Promise<Client | null> => {
     const sb = getSupabase();
     if (!sb) return null;
@@ -1706,7 +1776,7 @@ function useSupabaseData(): AppData {
     loading,
     error,
     createOrder, createOrderWithPayment, createFullOrder, updateFullOrder,
-    updateOrder, updateOrderStatus,
+    updateOrder, updateOrderStatus, deleteOrder,
     createClient, updateClient, createTransaction,
     deleteTransaction, updateTransaction, loadOrderMedia,
     createCar, updateCar, addTemplate, refresh: syncCoreData,

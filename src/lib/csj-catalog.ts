@@ -169,6 +169,7 @@ export const csjBrandNames: Record<string, BrandName> = {
 
 const automaticTranslations = translationsJson as {
   brandsEn: Record<string, string>;
+  modelsEn?: Record<string, string>;
   modelsRu: Record<string, string>;
   descriptionsRu: Record<string, string>;
 };
@@ -177,6 +178,34 @@ const csjModelNames: Record<string, string> = {
   "INSPIRE/英仕派": "INSPIRE",
   "INSPIRE/英仕派 新能源": "INSPIRE",
   "UNI-Z新能源": "UNI-Z",
+};
+
+/** Официальные международные названия моделей, которые машинный перевод искажает. */
+const csjOfficialModelNames: Record<string, string> = {
+  "亚洲龙": "Avalon", "亚洲狮": "Allion", "佳美": "Camry", "凯美瑞": "Camry",
+  "卡罗拉": "Corolla", "卡罗拉双擎E+（新能源）": "Corolla PHEV", "卡罗拉锐放": "Corolla Cross",
+  "兰德酷路泽(陆地巡洋舰)": "Land Cruiser", "凌放HARRIER": "Harrier", "汉兰达": "Highlander",
+  "海拉克斯": "Hilux", "皇冠": "Crown", "皇冠陆放": "Crown Kluger", "红杉": "Sequoia",
+  "坦途": "Tundra", "埃尔法": "Alphard", "塞纳": "Sienna", "赛那SIENNA": "Sienna",
+  "威尔法": "Vellfire", "威兰达": "Wildlander", "威兰达新能源": "Wildlander PHEV",
+  "威飒": "Venza", "威驰": "Vios", "普拉多(霸道)": "Land Cruiser Prado", "霸道": "Land Cruiser Prado",
+  "普锐斯": "Prius", "普瑞维亚(大霸王)": "Previa", "锐志": "Mark X", "雅力士": "Yaris",
+  "雷凌": "Levin", "花冠": "Corolla EX", "锋兰达": "Frontlander", "FJ酷路泽": "FJ Cruiser",
+  "RAV4荣放": "RAV4", "RAV4荣放双擎E+": "RAV4 PHEV",
+  "4Runner（超霸）": "4Runner", "丰田BZ3": "bZ3", "一汽丰田BZ4X": "bZ4X", "丰田BZ4X": "bZ4X",
+  "丰田BZ5": "bZ5", "铂智3X": "bZ3X", "铂智4X": "bZ4X", "铂智7": "bZ7",
+  "超霸": "4Runner", "86": "86", "卡罗拉双擎E+": "Corolla PHEV",
+  "雷凌双擎E+": "Levin PHEV", "雷凌双擎E+（新能源）": "Levin PHEV",
+  "Model 3": "Model 3", "MODEL 3": "Model 3",
+  "E级": "E-Class", "E级新能源": "E-Class Hybrid", "E系列": "E-Series",
+  "eπ007": "eπ007", "eπ008": "eπ008", "e爱丽舍": "e-Elysée",
+  "雷克萨斯GX": "GX", "雷克萨斯LX": "LX", "雷克萨斯RX": "RX",
+  "逸动": "Eado", "逸动PLUS": "Eado Plus", "长安CS35": "CS35", "长安CS55": "CS55",
+  "长安CS75": "CS75", "长安CS95": "CS95", "深蓝S7": "Deepal S7", "深蓝SL03": "Deepal SL03",
+  "宋PLUS新能源": "Song Plus", "宋Pro新能源": "Song Pro", "秦PLUS": "Qin Plus",
+  "唐新能源": "Tang", "汉": "Han", "元PLUS": "Atto 3", "海豚": "Dolphin", "海豹": "Seal",
+  "星越L": "Monjaro", "缤越": "Coolray", "博越": "Atlas", "帝豪": "Emgrand",
+  "瑞虎7": "Tiggo 7", "瑞虎8": "Tiggo 8", "瑞虎9": "Tiggo 9",
 };
 
 const exactAutomotiveTranslations: Record<string, string> = {
@@ -245,6 +274,33 @@ export function getCsjModelName(modelZh: string) {
     return automaticTranslations.modelsRu[modelZh] || modelZh;
   }
   return modelZh.trim();
+}
+
+export function getCsjModelEnglishName(modelZh: string) {
+  if (csjOfficialModelNames[modelZh]) return csjOfficialModelNames[modelZh];
+  const normalized = modelZh.replace(/系列$/u, "").trim();
+  if (/^[A-Za-z0-9]/u.test(normalized)) {
+    const originalInternationalName = normalized
+      .replace(/[\u3400-\u9fff]+/gu, " ")
+      .replace(/[（）()]/gu, " ")
+      .replace(/\s+/gu, " ")
+      .trim();
+    if (originalInternationalName.length > 1) return originalInternationalName;
+  }
+  const latinParts = normalized.match(/[A-Za-z0-9]*[A-Za-z][A-Za-z0-9+_.-]*/gu) || [];
+  const latinLength = latinParts.join("").replace(/[^A-Za-z0-9]/gu, "").length;
+  if (latinParts.length && (/^[A-Za-z0-9]/u.test(normalized) || latinLength >= 4)) {
+    return Array.from(new Set(latinParts)).join(" ")
+      .replace(/新能源/gu, "")
+      .replace(/\s+/gu, " ")
+      .trim();
+  }
+  const translated = automaticTranslations.modelsEn?.[modelZh]
+    || `Model ${normalized.match(/\d+/u)?.[0] || ""}`;
+  return translated
+    .replace(/[\u3400-\u9fff（）()]/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
 }
 
 export function getCsjDescription(descriptionZh: string) {

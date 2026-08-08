@@ -10,6 +10,7 @@ import { useData } from "@/lib/data-context";
 import { useAuth } from "@/lib/auth-context";
 import { kitLabels, clientSources } from "@/lib/demo-data";
 import { OrderPhotoPicker } from "@/components/order-photo-picker";
+import { CarCatalogPicker, type CatalogMediaMatch } from "@/components/car-catalog-picker";
 import type { Car as ClientCar, Client } from "@/lib/types";
 import {
   ArrowLeft, User, Car, Package, ImagePlus, MessageSquare,
@@ -136,6 +137,25 @@ export default function NewOrderPage() {
     setForm((prev) => ({ ...prev, [field]: value }));
     setDirty(true);
     setSaveError(null);
+  };
+
+  const applyCatalogCar = (brand: string, model: string) => {
+    setForm(prev => ({ ...prev, carBrand: brand, carModel: model, existingCarId: "" }));
+    setDirty(true);
+    setSaveError(null);
+  };
+
+  const applyCatalogMedia = (match: CatalogMediaMatch | null) => {
+    setForm(prev => ({
+      ...prev,
+      carViewPhotos: match?.carImageUrl
+        ? (!prev.carViewPhotos.length || prev.carViewPhotos[0].includes("/api/csj-image") ? [match.carImageUrl] : prev.carViewPhotos)
+        : prev.carViewPhotos.filter(url => !url.includes("/api/csj-image")),
+      layoutPhotos: match?.technologyImageUrl
+        ? (!prev.layoutPhotos.length || prev.layoutPhotos[0].includes("/api/csj-image") ? [match.technologyImageUrl] : prev.layoutPhotos)
+        : prev.layoutPhotos.filter(url => !url.includes("/api/csj-image")),
+    }));
+    setDirty(true);
   };
 
   const toggleKit = (kit: string) => {
@@ -533,16 +553,13 @@ export default function NewOrderPage() {
                 )}
                 {!form.existingCarId && <>
                 <p className="text-sm font-medium">{existingClient && cars.some(car => car.clientId === existingClient.id) ? "Новый автомобиль" : "Данные автомобиля"}</p>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-sm text-muted-foreground mb-1 block">Марка</label>
-                    <Input placeholder="" value={form.carBrand} onChange={(e) => updateForm("carBrand", e.target.value)} />
-                  </div>
-                  <div>
-                    <label className="text-sm text-muted-foreground mb-1 block">Модель</label>
-                    <Input placeholder="" value={form.carModel} onChange={(e) => updateForm("carModel", e.target.value)} />
-                  </div>
-                </div>
+                <CarCatalogPicker
+                  brand={form.carBrand}
+                  model={form.carModel}
+                  year={form.carYear}
+                  onCarChange={applyCatalogCar}
+                  onMediaFound={applyCatalogMedia}
+                />
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="text-sm text-muted-foreground mb-1 block">Поколение</label>

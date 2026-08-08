@@ -118,18 +118,24 @@ async function main() {
     generatedAt: null,
     sourceLanguage: "zh-CN",
     brandsEn: {},
+    modelsEn: {},
     modelsRu: {},
     descriptionsRu: {},
   });
 
   const makes = catalog.makes.map((make) => make.nameZh);
-  const models = catalog.models.map((model) => model.modelZh);
+  const models = [
+    ...catalog.models.map((model) => model.modelZh),
+    ...catalog.vehicles.map((vehicle) => vehicle.modelZh),
+  ];
   const descriptions = catalog.vehicles.flatMap((vehicle) => [
     ...(vehicle.descriptions || []),
     ...Object.values(vehicle.details || {}),
   ]);
 
   await translateMissing(makes, "en", translations.brandsEn, "Марки → EN");
+  translations.modelsEn ||= {};
+  await translateMissing(models, "en", translations.modelsEn, "Модели → EN");
   await translateMissing(models, "ru", translations.modelsRu, "Модели → RU");
   await translateMissing(
     descriptions,
@@ -143,7 +149,7 @@ async function main() {
 
   console.log(
     `Сохранено переводов: ${Object.keys(translations.brandsEn).length} марок, ` +
-      `${Object.keys(translations.modelsRu).length} моделей, ` +
+      `${Object.keys(translations.modelsEn).length} моделей EN, ${Object.keys(translations.modelsRu).length} моделей RU, ` +
       `${Object.keys(translations.descriptionsRu).length} описаний`,
   );
   console.log(OUTPUT_FILE);

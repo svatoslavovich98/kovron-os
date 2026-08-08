@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { LogOut } from "lucide-react";
+import { NotificationCenter } from "@/components/notification-center";
 
 export default function SeamstressLayout({ children }: { children: React.ReactNode }) {
   const { user, loading, logout } = useAuth();
@@ -37,12 +38,15 @@ export default function SeamstressLayout({ children }: { children: React.ReactNo
             KOVRON <span className="text-primary">OS</span>
           </h1>
         </div>
-        <button
-          onClick={() => { logout(); router.replace("/login"); }}
-          className="p-2 hover:bg-background rounded-sm transition-colors text-muted-foreground"
-        >
-          <LogOut className="h-5 w-5" />
-        </button>
+        <div className="flex items-center gap-1">
+          <NotificationCenter />
+          <button
+            onClick={() => { logout(); router.replace("/login"); }}
+            className="p-2 hover:bg-background rounded-sm transition-colors text-muted-foreground"
+          >
+            <LogOut className="h-5 w-5" />
+          </button>
+        </div>
       </header>
       <main className="pb-8">{children}</main>
     </div>
