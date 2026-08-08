@@ -1,13 +1,19 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useState } from "react";
 import {
   CarFront,
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  Copy,
   Database,
   ExternalLink,
   Globe2,
   ImageOff,
   Search,
+  ScanLine,
+  X,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -24,7 +30,10 @@ interface CatalogResult {
   years: number[];
   descriptions: string[];
   descriptionsRu: string[];
+  detailsRu: Array<{ label: string; value: string }>;
+  powertrain: string;
   imagePath: string;
+  technologyImagePaths: string[];
   sourceUrl: string;
   downloads: number;
   categoryId: number;
@@ -51,6 +60,28 @@ interface CatalogResponse {
   }>;
 }
 
+interface CatalogOption {
+  value: string;
+  label: string;
+  labelZh: string;
+}
+
+interface SearchFilters {
+  query: string;
+  year: string;
+  category: number;
+  make: string;
+  model: string;
+}
+
+const initialFilters: SearchFilters = {
+  query: "",
+  year: "",
+  category: 0,
+  make: "",
+  model: "",
+};
+
 const categories = [
   { id: 0, label: "Все коврики" },
   { id: 20, label: "Полный охват" },
@@ -58,7 +89,13 @@ const categories = [
   { id: 32, label: "Полное покрытие" },
 ];
 
-function CatalogThumbnail({ path, alt }: { path: string; alt: string }) {
+interface ImageViewerState {
+  title: string;
+  paths: string[];
+  index: number;
+}
+
+function CatalogThumbnail({ path, alt, onOpen }: { path: string; alt: string; onOpen: () => void }) {
   const [failed, setFailed] = useState(false);
 
   if (!path || failed) {
@@ -71,36 +108,83 @@ function CatalogThumbnail({ path, alt }: { path: string; alt: string }) {
   }
 
   return (
-    <img
-      src={`/api/csj-image?path=${encodeURIComponent(path)}`}
-      alt={alt}
-      loading="lazy"
-      onError={() => setFailed(true)}
-      className="h-full w-full object-contain bg-white"
-    />
+    <button type="button" onClick={onOpen} className="group relative h-full w-full cursor-zoom-in" title="Открыть фотографию">
+      <img
+        src={`/api/csj-image?path=${encodeURIComponent(path)}`}
+        alt={alt}
+        loading="lazy"
+        onError={() => setFailed(true)}
+        className="h-full w-full object-contain bg-white transition-transform group-hover:scale-[1.03]"
+      />
+      <span className="absolute bottom-1.5 right-1.5 rounded-md bg-black/65 px-2 py-1 text-[10px] font-medium text-white opacity-0 transition-opacity group-hover:opacity-100">
+        Увеличить
+      </span>
+    </button>
   );
 }
 
 export default function ChinaCatalogPage() {
-  const [query, setQuery] = useState("");
-  const [debouncedQuery, setDebouncedQuery] = useState("");
-  const [year, setYear] = useState("");
-  const [category, setCategory] = useState(0);
+  const [filters, setFilters] = useState<SearchFilters>(initialFilters);
+  const [appliedFilters, setAppliedFilters] = useState<SearchFilters>(initialFilters);
+  const [makeOptions, setMakeOptions] = useState<CatalogOption[]>([]);
+  const [modelOptions, setModelOptions] = useState<CatalogOption[]>([]);
   const [data, setData] = useState<CatalogResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [copiedName, setCopiedName] = useState("");
+  const [viewer, setViewer] = useState<ImageViewerState | null>(null);
 
   useEffect(() => {
-    const timeout = window.setTimeout(() => setDebouncedQuery(query), 280);
-    return () => window.clearTimeout(timeout);
-  }, [query]);
+    if (!viewer) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setViewer(null);
+      if (event.key === "ArrowLeft") {
+        setViewer((current) => current && ({ ...current, index: (current.index - 1 + current.paths.length) % current.paths.length }));
+      }
+      if (event.key === "ArrowRight") {
+        setViewer((current) => current && ({ ...current, index: (current.index + 1) % current.paths.length }));
+      }
+    };
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [viewer]);
+
+  useEffect(() => {
+    fetch("/api/csj-catalog?options=1")
+      .then((response) => response.json())
+      .then((options: { makes: CatalogOption[] }) => setMakeOptions(options.makes || []))
+      .catch(() => setMakeOptions([]));
+  }, []);
+
+  useEffect(() => {
+    if (!filters.make) {
+      setModelOptions([]);
+      return;
+    }
+    const controller = new AbortController();
+    const params = new URLSearchParams({ options: "1", make: filters.make });
+    fetch(`/api/csj-catalog?${params}`, { signal: controller.signal })
+      .then((response) => response.json())
+      .then((options: { models: CatalogOption[] }) => setModelOptions(options.models || []))
+      .catch((reason) => {
+        if (reason?.name !== "AbortError") setModelOptions([]);
+      });
+    return () => controller.abort();
+  }, [filters.make]);
 
   useEffect(() => {
     const controller = new AbortController();
     const params = new URLSearchParams({ limit: "36" });
-    if (debouncedQuery.trim()) params.set("q", debouncedQuery.trim());
-    if (/^\d{4}$/u.test(year)) params.set("year", year);
-    if (category) params.set("category", String(category));
+    if (appliedFilters.query.trim()) params.set("q", appliedFilters.query.trim());
+    if (/^\d{4}$/u.test(appliedFilters.year)) params.set("year", appliedFilters.year);
+    if (appliedFilters.category) params.set("category", String(appliedFilters.category));
+    if (appliedFilters.make) params.set("make", appliedFilters.make);
+    if (appliedFilters.model) params.set("model", appliedFilters.model);
 
     setLoading(true);
     setError("");
@@ -120,7 +204,33 @@ export default function ChinaCatalogPage() {
       });
 
     return () => controller.abort();
-  }, [debouncedQuery, year, category]);
+  }, [appliedFilters]);
+
+  const submitSearch = (event: FormEvent) => {
+    event.preventDefault();
+    setAppliedFilters({ ...filters });
+  };
+
+  const copySourceName = async (makeZh: string, modelZh: string) => {
+    const value = `${makeZh} ${modelZh}`.trim();
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopiedName(value);
+      window.setTimeout(() => setCopiedName((current) => current === value ? "" : current), 1800);
+    } catch {
+      setError("Не удалось скопировать название. Разрешите доступ к буферу обмена и попробуйте ещё раз");
+    }
+  };
+
+  const openViewer = (title: string, paths: string[]) => {
+    if (paths.length) setViewer({ title, paths, index: 0 });
+  };
+
+  const resetSearch = () => {
+    setFilters(initialFilters);
+    setAppliedFilters(initialFilters);
+    setModelOptions([]);
+  };
 
   const updatedAt = useMemo(() => {
     if (!data?.generatedAt) return "";
@@ -151,32 +261,58 @@ export default function ChinaCatalogPage() {
           </a>
         </div>
 
-        <div className="relative grid grid-cols-1 sm:grid-cols-[1fr_150px] gap-3 mt-5">
+        <form onSubmit={submitSearch} className="relative space-y-3 mt-5">
+        <div className="grid grid-cols-1 sm:grid-cols-[1fr_150px] gap-3">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
             <Input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
+              value={filters.query}
+              onChange={(event) => setFilters((current) => ({ ...current, query: event.target.value }))}
               placeholder="Например: Lexus GX 2012 или Changan UNI-Z"
               className="pl-10 h-12 bg-background"
             />
           </div>
           <Input
-            value={year}
-            onChange={(event) => setYear(event.target.value.replace(/\D/g, "").slice(0, 4))}
+            value={filters.year}
+            onChange={(event) => setFilters((current) => ({ ...current, year: event.target.value.replace(/\D/g, "").slice(0, 4) }))}
             inputMode="numeric"
             placeholder="Год выпуска"
             className="h-12 bg-background"
           />
         </div>
 
-        <div className="relative flex gap-2 mt-3 overflow-x-auto pb-1">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <select
+            value={filters.make}
+            onChange={(event) => setFilters((current) => ({ ...current, make: event.target.value, model: "" }))}
+            className="h-12 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
+          >
+            <option value="">Все марки</option>
+            {makeOptions.map((item) => (
+              <option key={item.value} value={item.value}>{item.label} — {item.labelZh}</option>
+            ))}
+          </select>
+          <select
+            value={filters.model}
+            onChange={(event) => setFilters((current) => ({ ...current, model: event.target.value }))}
+            disabled={!filters.make}
+            className="h-12 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <option value="">{filters.make ? "Все модели" : "Сначала выберите марку"}</option>
+            {modelOptions.map((item) => (
+              <option key={item.value} value={item.value}>{item.label}</option>
+            ))}
+          </select>
+        </div>
+
+        <div className="flex gap-2 overflow-x-auto pb-1">
           {categories.map((item) => (
             <button
               key={item.id}
-              onClick={() => setCategory(item.id)}
+              type="button"
+              onClick={() => setFilters((current) => ({ ...current, category: item.id }))}
               className={`shrink-0 rounded-full border px-3.5 py-2 text-xs font-medium transition-colors ${
-                category === item.id
+                filters.category === item.id
                   ? "border-primary bg-primary text-primary-foreground"
                   : "border-border bg-background text-muted-foreground hover:text-foreground"
               }`}
@@ -185,6 +321,13 @@ export default function ChinaCatalogPage() {
             </button>
           ))}
         </div>
+        <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2">
+          <Button type="button" variant="outline" onClick={resetSearch}>Сбросить</Button>
+          <Button type="submit" disabled={loading}>
+            <Search className="h-4 w-4 mr-2" />{loading ? "Ищем…" : "Найти лекала"}
+          </Button>
+        </div>
+        </form>
       </section>
 
       {data && (
@@ -216,8 +359,16 @@ export default function ChinaCatalogPage() {
                   <CarFront className="h-5 w-5 text-muted-foreground" />
                 </div>
                 <div className="min-w-0">
-                  <p className="text-sm font-medium truncate">{item.make} {item.model}</p>
-                  <p className="text-[10px] text-muted-foreground truncate">На сайте: {item.makeZh} · {item.modelZh}</p>
+                  <p className="text-base font-semibold truncate">{item.make} {item.model}</p>
+                  <button
+                    type="button"
+                    onClick={() => copySourceName(item.makeZh, item.modelZh)}
+                    className="mt-0.5 flex max-w-full items-center gap-1 text-left text-xs text-muted-foreground hover:text-primary"
+                    title="Скопировать китайское название"
+                  >
+                    {copiedName === `${item.makeZh} ${item.modelZh}`.trim() ? <Check className="h-3 w-3 shrink-0" /> : <Copy className="h-3 w-3 shrink-0" />}
+                    <span className="truncate">{copiedName === `${item.makeZh} ${item.modelZh}`.trim() ? "Скопировано" : `На сайте: ${item.makeZh} · ${item.modelZh}`}</span>
+                  </button>
                 </div>
               </div>
             ))}
@@ -241,38 +392,71 @@ export default function ChinaCatalogPage() {
         <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-4">
           {data.results.map((item) => (
             <article key={`${item.categoryId}-${item.id}`} className="rounded-xl border border-border bg-card overflow-hidden hover:border-primary/40 transition-colors">
-              <div className="grid grid-cols-[128px_1fr] min-h-[150px]">
+              <div className="grid grid-cols-[132px_1fr] sm:grid-cols-[148px_1fr] min-h-[168px]">
                 <div className="border-r border-border p-2 bg-white">
-                  <CatalogThumbnail path={item.imagePath} alt={`${item.make} ${item.model}`} />
+                  <CatalogThumbnail
+                    path={item.imagePath}
+                    alt={`${item.make} ${item.model}`}
+                    onOpen={() => openViewer(`${item.make} ${item.model}`, [item.imagePath].filter(Boolean))}
+                  />
                 </div>
                 <div className="p-4 min-w-0">
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
-                      <h2 className="font-bold text-base leading-tight truncate">{item.make} {item.model}</h2>
-                      <p className="text-xs text-muted-foreground mt-1 truncate">
-                        На сайте: {item.makeZh} · {item.modelZh}
-                      </p>
+                      <h2 className="font-bold text-lg leading-tight">{item.make} {item.model}</h2>
+                      <button
+                        type="button"
+                        onClick={() => copySourceName(item.makeZh, item.modelZh)}
+                        className="mt-1 flex max-w-full items-center gap-1 text-left text-xs text-muted-foreground hover:text-primary"
+                        title="Скопировать китайское название для поиска на сайте"
+                      >
+                        {copiedName === `${item.makeZh} ${item.modelZh}`.trim() ? <Check className="h-3.5 w-3.5 shrink-0" /> : <Copy className="h-3.5 w-3.5 shrink-0" />}
+                        <span className="truncate">{copiedName === `${item.makeZh} ${item.modelZh}`.trim() ? "Скопировано" : `На сайте: ${item.makeZh} · ${item.modelZh}`}</span>
+                      </button>
                     </div>
                     <span className="shrink-0 h-2.5 w-2.5 rounded-full bg-primary mt-1" title="Лекало найдено" />
                   </div>
                   <div className="flex flex-wrap gap-1.5 mt-3">
-                    <span className="rounded-full bg-primary/10 text-primary px-2 py-1 text-[10px] font-semibold">{item.category}</span>
-                    <span className="rounded-full bg-secondary px-2 py-1 text-[10px]">{item.yearLabel || "Год не указан"}</span>
+                    <span className="rounded-full bg-primary/10 text-primary px-2.5 py-1 text-xs font-semibold">{item.category}</span>
+                    {item.powertrain && <span className="rounded-full bg-secondary px-2.5 py-1 text-xs font-semibold text-foreground">{item.powertrain}</span>}
                   </div>
-                  <p className="text-xs mt-3"><span className="text-muted-foreground">Код лекала:</span> <span className="font-mono font-semibold">{item.code}</span></p>
+                  <p className="mt-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">Годы выпуска</p>
+                  <p className="mt-0.5 text-lg sm:text-xl font-extrabold leading-tight text-foreground">{item.yearLabel || "Не указаны"}</p>
+                  <p className="text-sm mt-3"><span className="text-muted-foreground">Код лекала:</span> <span className="font-mono font-bold text-foreground">{item.code}</span></p>
                 </div>
               </div>
 
               <div className="border-t border-border p-4 space-y-3">
+                {item.detailsRu.length > 0 && (
+                  <dl className="grid grid-cols-1 gap-2 rounded-lg bg-secondary/45 p-3 text-sm">
+                    {item.detailsRu.map((detail) => (
+                      <div key={`${detail.label}-${detail.value}`} className="grid grid-cols-[120px_1fr] gap-2">
+                        <dt className="font-medium text-muted-foreground">{detail.label}</dt>
+                        <dd className="font-semibold text-foreground">{detail.value}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                )}
                 {item.descriptionsRu.length > 0 && (
-                  <ul className="space-y-1 text-xs text-muted-foreground">
-                    {item.descriptionsRu.slice(0, 3).map((description, index) => (
+                  <ul className="space-y-1.5 text-sm text-foreground/85">
+                    {item.descriptionsRu.slice(0, 6).map((description, index) => (
                       <li key={index} className="flex gap-2">
                         <span className="text-primary">•</span><span>{description}</span>
                       </li>
                     ))}
                   </ul>
                 )}
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={!item.technologyImagePaths.length}
+                  onClick={() => openViewer(`Технологический чертёж · ${item.code}`, item.technologyImagePaths)}
+                  className="w-full"
+                >
+                  <ScanLine className="h-4 w-4 mr-2" />
+                  {item.technologyImagePaths.length ? "Открыть технологический чертёж" : "Чертёж отсутствует"}
+                </Button>
                 <a href={item.sourceUrl} target="_blank" rel="noopener noreferrer" className="block">
                   <Button variant="outline" size="sm" className="w-full">
                     <ExternalLink className="h-4 w-4 mr-2" />Открыть лекало на сайте
@@ -295,6 +479,53 @@ export default function ChinaCatalogPage() {
           <span className="flex items-center gap-2"><Database className="h-4 w-4" />Последняя синхронизация: {updatedAt}</span>
           <span>Перевод автоматический, оригинальные китайские названия сохранены</span>
         </footer>
+      )}
+
+      {viewer && (
+        <div
+          className="fixed inset-0 z-[100] flex flex-col bg-black/90 p-3 sm:p-6"
+          role="dialog"
+          aria-modal="true"
+          aria-label={viewer.title}
+          onClick={() => setViewer(null)}
+        >
+          <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-3 text-white">
+            <div className="min-w-0">
+              <p className="truncate text-base font-bold sm:text-xl">{viewer.title}</p>
+              {viewer.paths.length > 1 && <p className="text-sm text-white/70">Изображение {viewer.index + 1} из {viewer.paths.length}</p>}
+            </div>
+            <button type="button" onClick={() => setViewer(null)} className="rounded-full bg-white/10 p-3 hover:bg-white/20" aria-label="Закрыть">
+              <X className="h-6 w-6" />
+            </button>
+          </div>
+          <div className="relative mx-auto mt-3 flex min-h-0 w-full max-w-6xl flex-1 items-center justify-center" onClick={(event) => event.stopPropagation()}>
+            <img
+              src={`/api/csj-image?path=${encodeURIComponent(viewer.paths[viewer.index])}`}
+              alt={viewer.title}
+              className="max-h-full max-w-full rounded-lg bg-white object-contain shadow-2xl"
+            />
+            {viewer.paths.length > 1 && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setViewer((current) => current && ({ ...current, index: (current.index - 1 + current.paths.length) % current.paths.length }))}
+                  className="absolute left-1 rounded-full bg-black/60 p-3 text-white hover:bg-black/80 sm:left-4"
+                  aria-label="Предыдущее изображение"
+                >
+                  <ChevronLeft className="h-7 w-7" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewer((current) => current && ({ ...current, index: (current.index + 1) % current.paths.length }))}
+                  className="absolute right-1 rounded-full bg-black/60 p-3 text-white hover:bg-black/80 sm:right-4"
+                  aria-label="Следующее изображение"
+                >
+                  <ChevronRight className="h-7 w-7" />
+                </button>
+              </>
+            )}
+          </div>
+        </div>
       )}
     </div>
   );

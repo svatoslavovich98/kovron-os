@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import Link from "next/link";
@@ -9,6 +9,7 @@ import {
   Users, Settings, ChevronRight, Plus, ArrowLeftRight,
   TrendingUp, TrendingDown, LogOut, Bell, User,
   CreditCard, BookOpen, X, Menu, GraduationCap, Globe2,
+  ArrowUp,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Avatar } from "@/components/ui/avatar";
@@ -41,6 +42,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [showAddMenu, setShowAddMenu] = useState(false);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
+  const [showScrollTop, setShowScrollTop] = useState(false);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!loading && !user) router.replace("/login");
@@ -130,10 +133,26 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
       {/* Main content */}
       <main className="flex-1 flex flex-col min-h-0 overflow-hidden">
-        <div className="flex-1 overflow-y-auto pb-20 lg:pb-0">
+        <div
+          ref={scrollContainerRef}
+          onScroll={(event) => setShowScrollTop(event.currentTarget.scrollTop > 500)}
+          className="flex-1 overflow-y-auto pb-20 lg:pb-0"
+        >
           {children}
         </div>
       </main>
+
+      {showScrollTop && (
+        <button
+          type="button"
+          onClick={() => scrollContainerRef.current?.scrollTo({ top: 0, behavior: "smooth" })}
+          className="fixed bottom-24 right-4 z-40 flex h-10 w-10 items-center justify-center rounded-full border border-border/70 bg-card/75 text-muted-foreground shadow-md backdrop-blur-md transition-all hover:bg-card hover:text-foreground active:scale-95 lg:bottom-6 lg:right-6"
+          aria-label="Вернуться в начало страницы"
+          title="Наверх"
+        >
+          <ArrowUp className="h-4 w-4" />
+        </button>
+      )}
 
       {/* Mobile bottom nav */}
       <nav className="lg:hidden fixed bottom-0 left-0 right-0 border-t border-border glass z-50">

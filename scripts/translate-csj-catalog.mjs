@@ -124,7 +124,10 @@ async function main() {
 
   const makes = catalog.makes.map((make) => make.nameZh);
   const models = catalog.models.map((model) => model.modelZh);
-  const descriptions = catalog.vehicles.flatMap((vehicle) => vehicle.descriptions || []);
+  const descriptions = catalog.vehicles.flatMap((vehicle) => [
+    ...(vehicle.descriptions || []),
+    ...Object.values(vehicle.details || {}),
+  ]);
 
   await translateMissing(makes, "en", translations.brandsEn, "Марки → EN");
   await translateMissing(models, "ru", translations.modelsRu, "Модели → RU");

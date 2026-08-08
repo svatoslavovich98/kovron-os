@@ -7,7 +7,17 @@ export interface CsjCatalogVehicle {
   yearLabel: string;
   years: number[];
   descriptions: string[];
+  details: {
+    body: string;
+    drive: string;
+    transmission: string;
+    engine: string;
+    version: string;
+    emissions: string;
+    property: string;
+  };
   imageUrl: string;
+  technologyImages: string[];
   sourceUrl: string;
   downloads: number;
   categoryId: number;
@@ -165,9 +175,44 @@ const automaticTranslations = translationsJson as {
 
 const csjModelNames: Record<string, string> = {
   "INSPIRE/英仕派": "INSPIRE",
-  "INSPIRE/英仕派 新能源": "INSPIRE (гибрид/электро)",
-  "UNI-Z新能源": "UNI-Z (гибрид/электро)",
+  "INSPIRE/英仕派 新能源": "INSPIRE",
+  "UNI-Z新能源": "UNI-Z",
 };
+
+const exactAutomotiveTranslations: Record<string, string> = {
+  "纯油版": "Бензин",
+  "燃油版": "Бензин",
+  "汽油版": "Бензин",
+  "非混动版": "Бензин",
+  "非混合动力": "Бензин",
+  "混动版": "Гибрид",
+  "混合动力": "Гибрид",
+  "油电混合": "Гибрид",
+  "双擎": "Гибрид",
+  "轻混版": "Мягкий гибрид",
+  "插电式混合动力": "Подключаемый гибрид",
+  "插混版": "Подключаемый гибрид",
+  "纯电动": "Электро",
+  "纯电版": "Электро",
+  "柴油版": "Дизель",
+};
+
+function improveAutomotiveRussian(value: string) {
+  return value
+    .replace(/версия с чистым маслом|версия для чистого масла|чисто масляная версия/giu, "бензиновая версия")
+    .replace(/негибридная версия|не гибридная версия/giu, "бензиновая версия")
+    .replace(/чисто электрическая версия|чистая электрическая версия/giu, "электро")
+    .replace(/легкая гибридная версия|облегченная гибридная версия/giu, "мягкий гибрид")
+    .replace(/7-битн(?:ая|ый) машин(?:а|ы)/giu, "7-местный автомобиль")
+    .replace(/компьютерн(?:ый|ая) (?:ящик|бокс|коробка)/giu, "электронный блок")
+    .replace(/главный водитель|основной водитель/giu, "водитель")
+    .replace(/второй пилот/giu, "передний пассажир")
+    .replace(/дроссельная заслонка/giu, "педаль газа")
+    .replace(/нет слайдера под задними сиденьями/giu, "под задними сиденьями нет направляющих")
+    .replace(/резиновая оболочка/giu, "пластиковый кожух")
+    .replace(/интерфейс питания/giu, "разъём питания")
+    .trim();
+}
 
 export function getCsjBrandName(makeZh: string) {
   return csjBrandNames[makeZh]?.en || automaticTranslations.brandsEn[makeZh] || makeZh;
@@ -203,7 +248,28 @@ export function getCsjModelName(modelZh: string) {
 }
 
 export function getCsjDescription(descriptionZh: string) {
-  return automaticTranslations.descriptionsRu[descriptionZh] || descriptionZh;
+  const exact = exactAutomotiveTranslations[descriptionZh];
+  if (exact) return exact;
+  return improveAutomotiveRussian(
+    automaticTranslations.descriptionsRu[descriptionZh] || descriptionZh,
+  );
+}
+
+export function getCsjPowertrain(vehicle: CsjCatalogVehicle) {
+  const source = [
+    vehicle.modelZh,
+    vehicle.yearLabel,
+    ...(vehicle.descriptions || []),
+    ...Object.values(vehicle.details || {}),
+  ].join(" ");
+
+  if (/柴油/u.test(source)) return "Дизель";
+  if (/纯油|非混|燃油|汽油/u.test(source)) return "Бензин";
+  if (/插电|插混|PHEV|DM-i|iDD|DHT/u.test(source)) return "Подключаемый гибрид";
+  if (/轻混/u.test(source)) return "Мягкий гибрид";
+  if (/混动|混合动力|油电|双擎|增程/u.test(source)) return "Гибрид";
+  if (/纯电|BEV|电动车/u.test(source)) return "Электро";
+  return "";
 }
 
 export function getCsjSearchText(vehicle: CsjCatalogVehicle) {
@@ -220,6 +286,9 @@ export function getCsjSearchText(vehicle: CsjCatalogVehicle) {
     ...(brand?.aliases || []),
     ...vehicle.descriptions,
     ...vehicle.descriptions.map(getCsjDescription),
+    ...Object.values(vehicle.details || {}),
+    ...Object.values(vehicle.details || {}).map(getCsjDescription),
+    getCsjPowertrain(vehicle),
   ]
     .filter(Boolean)
     .join(" ")

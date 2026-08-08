@@ -100,7 +100,20 @@ function normalizeVehicle(row) {
     descriptions: [1, 2, 3, 4, 5, 6]
       .map((index) => String(row[`description_${index}`] || "").trim())
       .filter(Boolean),
+    details: {
+      body: String(row.car_body || "").trim(),
+      drive: String(row.drive_style || "").trim(),
+      transmission: String(row.transmission_type || "").trim(),
+      engine: String(row.output_volume || "").trim(),
+      version: String(row.version || "").trim(),
+      emissions: String(row.environmentalstandards || "").trim(),
+      property: String(row.property || "").trim(),
+    },
     imageUrl: row.show_img ? `${BASE_URL}/manage/${row.show_img}` : "",
+    technologyImages: [row.technology_img_1, row.technology_img_2]
+      .map((image) => String(image || "").trim())
+      .filter(Boolean)
+      .map((image) => `${BASE_URL}/manage/${image}`),
     sourceUrl: `${BASE_URL}/index.php/vehicle_model/show/nid/2/number/${encodeURIComponent(row.number || "")}`,
     downloads: Number(row.download || 0),
     categoryId: Number(row.product_classify_id),
