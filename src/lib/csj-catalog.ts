@@ -163,12 +163,26 @@ const automaticTranslations = translationsJson as {
   descriptionsRu: Record<string, string>;
 };
 
+const csjModelNames: Record<string, string> = {
+  "INSPIRE/英仕派": "INSPIRE",
+  "INSPIRE/英仕派 新能源": "INSPIRE (гибрид/электро)",
+  "UNI-Z新能源": "UNI-Z (гибрид/электро)",
+};
+
 export function getCsjBrandName(makeZh: string) {
   return csjBrandNames[makeZh]?.en || automaticTranslations.brandsEn[makeZh] || makeZh;
 }
 
 export function getCsjModelName(modelZh: string) {
+  if (csjModelNames[modelZh]) return csjModelNames[modelZh];
   const withoutSeries = modelZh.replace(/系列$/u, "").trim();
+  const latinName = withoutSeries
+    .replace(/[（(][\u3400-\u9fff\s]+[）)]/gu, "")
+    .replace(/\/[\u3400-\u9fff]+$/u, "")
+    .trim();
+  if (/^[a-zA-Z0-9]/u.test(latinName) && !/[\u3400-\u9fff]/u.test(latinName)) {
+    return latinName;
+  }
   if (!/[\u3400-\u9fff]/u.test(withoutSeries)) return withoutSeries;
   if (/[\u3400-\u9fff]/u.test(modelZh)) {
     return automaticTranslations.modelsRu[modelZh] || modelZh;

@@ -19,6 +19,12 @@ const prepared = catalog.vehicles.map((vehicle) => ({
 const modelsWithPatterns = new Set(
   catalog.vehicles.map((vehicle) => `${vehicle.makeZh}|${vehicle.modelZh}`),
 );
+const modelsWithPatternsByCategory = new Map<number, Set<string>>();
+for (const vehicle of catalog.vehicles) {
+  const categoryModels = modelsWithPatternsByCategory.get(vehicle.categoryId) || new Set<string>();
+  categoryModels.add(`${vehicle.makeZh}|${vehicle.modelZh}`);
+  modelsWithPatternsByCategory.set(vehicle.categoryId, categoryModels);
+}
 const preparedModels = catalog.models.map((model) => ({
   model,
   searchText: [
@@ -88,7 +94,9 @@ export async function GET(request: NextRequest) {
   const modelsWithoutPatterns = query
     ? preparedModels
         .filter(({ model, searchText }) =>
-          !modelsWithPatterns.has(`${model.makeZh}|${model.modelZh}`) &&
+          !(categoryId
+            ? modelsWithPatternsByCategory.get(categoryId)?.has(`${model.makeZh}|${model.modelZh}`)
+            : modelsWithPatterns.has(`${model.makeZh}|${model.modelZh}`)) &&
           tokens.every((token) => searchText.includes(token)),
         )
         .slice(0, 20)
