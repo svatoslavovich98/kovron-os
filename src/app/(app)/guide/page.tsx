@@ -5,15 +5,19 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { GuideSimulator } from "@/components/guide-simulator";
+import { GuideFixSimulator } from "@/components/guide-fix-simulator";
+import { GuidePhotoDemo } from "@/components/guide-photo-demo";
+import { GuideTodayPreview } from "@/components/guide-today-preview";
 import {
   BookOpen, Wallet, HandCoins, ShoppingBag, XCircle, ShieldCheck,
   AlertTriangle, LifeBuoy, ChevronDown, Users, DatabaseBackup,
-  Search, Check, X, Sparkles,
+  Search, Check, X, Sparkles, Pencil, Camera, CalendarDays, Table2,
 } from "lucide-react";
 
 type Key =
   | "payout" | "create" | "receive" | "cancel"
-  | "finance" | "limits" | "mistakes" | "roles" | "admin";
+  | "finance" | "fixmoney" | "photos" | "today" | "sheets"
+  | "limits" | "mistakes" | "roles" | "admin";
 
 const STORAGE = "kovron-guide-read";
 
@@ -28,6 +32,14 @@ const meta: { key: Key; title: string; sub: string; icon: typeof BookOpen; accen
     words: "отмена отменить возврат вернуть деньги клиенту" },
   { key: "finance", title: "Что означают цифры в финансах", sub: "Разбор показателей", icon: Wallet,
     words: "финансы баланс касса прибыль заработали долг обязательства" },
+  { key: "fixmoney", title: "Исправить ошибочную операцию", sub: "Правка и удаление", icon: Pencil,
+    words: "исправить удалить операцию ошибка сумма правка дубль лишнее" },
+  { key: "photos", title: "Фотографии и лекала", sub: "Что куда загружать", icon: Camera,
+    words: "фото фотография лекала раскладка вид машины салон обложка превью" },
+  { key: "today", title: "Сводка за день", sub: "Что показывает главная", icon: CalendarDays,
+    words: "сегодня сводка главная итог дня сколько заработали" },
+  { key: "sheets", title: "Выгрузка в Google Таблицы", sub: "Обновляется сама", icon: Table2,
+    words: "гугл таблицы экспорт выгрузка excel отчёт" },
   { key: "limits", title: "Чего программа не даст сделать", sub: "Защита от ошибок", icon: ShieldCheck,
     words: "ошибка запрет нельзя минус защита блокировка" },
   { key: "mistakes", title: "Частые ошибки", sub: "Что делать, если", icon: AlertTriangle,
@@ -401,6 +413,113 @@ const content: Record<Key, React.ReactNode> = {
         Финансы → «Доход», «Расход», «Перевод». Сюда вносится всё, что не связано
         с заказами: аренда, реклама, ремонт, налоги, связь. Обязательно выбирайте
         категорию — иначе расход не попадёт в аналитику.
+      </P>
+    </>
+  ),
+
+  fixmoney: (
+    <>
+      <P>
+        Ошиблись в сумме или провели лишнюю операцию — это исправимо.
+        Финансы → <b className="text-foreground">История операций</b> → нажмите на нужную строку.
+      </P>
+
+      <div className="mt-3"><GuideFixSimulator /></div>
+
+      <Steps items={[
+        <>Откроется окно с суммой и комментарием</>,
+        <>Поменяйте сумму или текст и нажмите <b className="text-foreground">Сохранить</b></>,
+        <>Либо <b className="text-foreground">Удалить</b>, если операции вообще не было</>,
+      ]} />
+      <Note tone="ok">
+        Изменения расходятся <b>везде</b>: баланс счёта, отчёты и оплата заказа
+        пересчитываются сразу. Не нужно ничего править вручную в других местах.
+      </Note>
+      <H>Когда что применять</H>
+      <Bullets items={[
+        <><b className="text-foreground">Опечатались в сумме</b> — правьте сумму</>,
+        <><b className="text-foreground">Операции вообще не было</b> — удаляйте</>,
+        <><b className="text-foreground">Клиент вернул деньги</b> — не удаляйте приход,
+          а оформите возврат через отмену заказа: так сохранится история</>,
+      ]} />
+      <Note tone="warn">
+        Удаление видно в журнале действий: кто, когда и на какую сумму.
+        Скрыть операцию «незаметно» не получится.
+      </Note>
+    </>
+  ),
+
+  photos: (
+    <>
+      <GuidePhotoDemo />
+
+      <H>Кнопка «Посмотреть лекала»</H>
+      <P>
+        В карточке заказа и прямо в списке. Открывает раскладку на весь экран,
+        можно приблизить пальцами или кнопками. Искать среди других фотографий не нужно.
+      </P>
+
+      <H>Как это работает внутри</H>
+      <P>
+        Фотографии сжимаются прямо в телефоне перед отправкой: снимок на 8 МБ
+        превращается в 300 КБ без заметной потери качества. Поэтому загрузка
+        быстрая даже с мобильного интернета.
+      </P>
+      <Note tone="warn">
+        Если фото не загрузилось за 25 секунд — появится ошибка.
+        Заказ всё равно можно сохранить, а фотографию добавить позже
+        через редактирование.
+      </Note>
+    </>
+  ),
+
+  today: (
+    <>
+      <P>
+        Вверху главной — блок <b className="text-foreground">«Сегодня»</b>.
+        Показывает, что произошло с начала дня.
+      </P>
+
+      <div className="mt-3"><GuideTodayPreview /></div>
+
+      <Bullets items={[
+        <><b className="text-foreground">Новых заказов</b> — сколько приняли и на какую сумму</>,
+        <><b className="text-foreground">Завершено</b> — сколько закрыли</>,
+        <><b className="text-foreground">Пришло денег</b> — реально полученное за день</>,
+        <><b className="text-foreground">Потрачено</b> — реально отданное</>,
+        <><b className="text-foreground">Итог дня</b> — разница между ними</>,
+      ]} />
+      <P>
+        Отдельной строкой видно, сколько за день отдали Оксане и китайцам.
+      </P>
+      <Note>
+        Если за день ничего не было, блок честно пишет «Пока тихо»,
+        а не показывает нули.
+      </Note>
+    </>
+  ),
+
+  sheets: (
+    <>
+      <P>
+        Все данные можно выгружать в Google Таблицы — они обновляются
+        <b className="text-foreground"> сами каждый день в 5 утра</b>.
+      </P>
+      <H>Что попадает в таблицу</H>
+      <Bullets items={[
+        <><b className="text-foreground">Сводка</b> — деньги на счетах, долги клиентов, долги подрядчикам</>,
+        <><b className="text-foreground">Счета</b> — остаток по каждому</>,
+        <><b className="text-foreground">Заказы</b> — с посчитанной прибылью по каждому</>,
+        <><b className="text-foreground">Финансы</b> — все операции</>,
+      ]} />
+      <Note>
+        Настройка делается один раз, инструкция с кодом лежит у Ильи.
+        Выгрузка работает <b>только на чтение</b> — из таблицы ничего
+        нельзя изменить или удалить в программе.
+      </Note>
+      <P>
+        Свои заметки в таблице пишите на отдельном листе — те четыре
+        переписываются при каждом обновлении.
       </P>
     </>
   ),

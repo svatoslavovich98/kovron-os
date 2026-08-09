@@ -14,9 +14,18 @@ import {
   AlertTriangle, Wallet, TrendingUp, TrendingDown, ArrowRight,
 } from "lucide-react";
 import Link from "next/link";
-import {
-  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
-} from "recharts";
+import dynamic from "next/dynamic";
+
+// Библиотека графиков тяжёлая и на Android разбирается заметно дольше.
+// Грузим её после того, как страница уже показана.
+const IncomeExpenseChart = dynamic(() => import("@/components/income-expense-chart"), {
+  ssr: false,
+  loading: () => (
+    <div className="h-48 flex items-center justify-center">
+      <div className="h-6 w-6 rounded-full border-2 border-primary/25 border-t-primary animate-spin" />
+    </div>
+  ),
+});
 
 const periods = [
   { key: "today", label: "Сегодня" },
@@ -350,21 +359,7 @@ export default function DashboardPage() {
                 </p>
               </div>
             ) : (
-            <div className="h-48">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={chartData} barGap={2}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                  <XAxis dataKey="name" tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} axisLine={false} tickLine={false} tickFormatter={(v) => `${v / 1000}k`} />
-                  <Tooltip
-                    contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "12px", fontSize: 13 }}
-                    formatter={(v: number) => formatCurrency(v)}
-                  />
-                  <Bar dataKey="income" fill="hsl(var(--income))" radius={[6, 6, 0, 0]} name="Доходы" />
-                  <Bar dataKey="expense" fill="hsl(var(--expense))" radius={[6, 6, 0, 0]} name="Расходы" />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
+              <IncomeExpenseChart data={chartData} />
             )}
           </CardContent>
         </Card>

@@ -688,6 +688,40 @@ function useDemoData(): AppData {
 }
 
 // ── Supabase data provider ─────────────────────────────
+/**
+ * Снимок данных в памяти устройства. Нужен, чтобы приложение открывалось
+ * мгновенно: сначала показываем сохранённое, потом тихо обновляем с сервера.
+ * Особенно заметно на Android — там браузер не кэширует так агрессивно,
+ * как Safari на айфоне, и каждый запуск ждал ответа из Лондона.
+ */
+const snapshotKey = (userId: string) => `kovron-data-snapshot-${userId}`;
+
+function readSnapshot(userId: string) {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(snapshotKey(userId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    // Снимок старше суток не показываем — данные слишком устарели
+    if (!parsed?.savedAt || Date.now() - parsed.savedAt > 24 * 60 * 60 * 1000) return null;
+    return parsed.data ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function writeSnapshot(userId: string, data: unknown) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(
+      snapshotKey(userId),
+      JSON.stringify({ savedAt: Date.now(), data })
+    );
+  } catch {
+    // Память переполнена — просто работаем без снимка
+  }
+}
+
 function useSupabaseData(): AppData {
   const { user } = useAuth();
   const [data, setData] = useState<{
@@ -715,10 +749,24 @@ function useSupabaseData(): AppData {
   const [error, setError] = useState<string | null>(null);
   const syncingCoreData = useRef(false);
 
+  // Показываем сохранённый снимок сразу, не дожидаясь сервера
+  const snapshotLoaded = useRef(false);
+  useEffect(() => {
+    if (!user || snapshotLoaded.current) return;
+    snapshotLoaded.current = true;
+    const snapshot = readSnapshot(user.id);
+    if (snapshot) {
+      setData(snapshot);
+      setLoading(false);
+    }
+  }, [user]);
+
   const fetchAll = useCallback(async () => {
     const sb = getSupabase();
     if (!sb || !user) { setLoading(false); return; }
-    setLoading(true);
+    // Если снимок уже показан, не гасим экран заглушкой —
+    // обновление идёт незаметно
+    if (!readSnapshot(user.id)) setLoading(true);
 
     try {
       const [
@@ -831,6 +879,14 @@ function useSupabaseData(): AppData {
 
     setLoading(false);
   }, [user]);
+
+  // Сохраняем снимок при каждом обновлении данных —
+  // следующий запуск откроется мгновенно
+  useEffect(() => {
+    if (!user || loading) return;
+    if (data.orders.length === 0 && data.accounts.length === 0) return;
+    writeSnapshot(user.id, data);
+  }, [user, data, loading]);
 
   const syncCoreData = useCallback(async () => {
     const sb = getSupabase();
