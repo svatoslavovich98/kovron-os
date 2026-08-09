@@ -3,6 +3,7 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import { Providers } from "./providers";
 import { ViewportSync } from "@/components/viewport-sync";
+import { PortraitGuard } from "@/components/portrait-guard";
 
 const inter = Inter({
   subsets: ["latin", "cyrillic"],
@@ -23,7 +24,8 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  maximumScale: 5,
+  maximumScale: 1,
+  userScalable: false,
   themeColor: "#111311",
 };
 
@@ -52,6 +54,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       </head>
       <body className={`${inter.variable} font-sans`}>
         <ViewportSync />
+        <PortraitGuard />
         <Providers>{children}</Providers>
       </body>
     </html>

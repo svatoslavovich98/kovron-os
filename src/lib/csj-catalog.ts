@@ -84,7 +84,7 @@ export const csjBrandNames: Record<string, BrandName> = {
   "长安轻型车": { en: "Changan Light Truck" },
   "长安跨越": { en: "Changan Kuayue" },
   "别克": { en: "Buick", aliases: ["Бьюик"] },
-  "路虎": { en: "Land Rover", aliases: ["Ленд Ровер"] },
+  "路虎": { en: "Land Rover", aliases: ["Range Rover", "Ленд Ровер", "Рендж Ровер"] },
   "广汽传祺": { en: "GAC Trumpchi", aliases: ["GAC", "Trumpchi"] },
   "捷途": { en: "Jetour", aliases: ["Джетур"] },
   "日产": { en: "Nissan", aliases: ["Ниссан"] },
@@ -200,6 +200,7 @@ const csjOfficialModelNames: Record<string, string> = {
   "E级": "E-Class", "E级新能源": "E-Class Hybrid", "E系列": "E-Series",
   "eπ007": "eπ007", "eπ008": "eπ008", "e爱丽舍": "e-Elysée",
   "雷克萨斯GX": "GX", "雷克萨斯LX": "LX", "雷克萨斯RX": "RX",
+  "极光": "Range Rover Evoque", "揽胜极光": "Range Rover Evoque",
   "逸动": "Eado", "逸动PLUS": "Eado Plus", "长安CS35": "CS35", "长安CS55": "CS55",
   "长安CS75": "CS75", "长安CS95": "CS95", "深蓝S7": "Deepal S7", "深蓝SL03": "Deepal SL03",
   "宋PLUS新能源": "Song Plus", "宋Pro新能源": "Song Pro", "秦PLUS": "Qin Plus",
@@ -224,6 +225,11 @@ const exactAutomotiveTranslations: Record<string, string> = {
   "纯电动": "Электро",
   "纯电版": "Электро",
   "柴油版": "Дизель",
+  "2门": "3-дверный кузов",
+  "两门": "3-дверный кузов",
+  "4门": "5-дверный кузов",
+  "四门": "5-дверный кузов",
+  "敞篷车": "Кабриолет",
 };
 
 function improveAutomotiveRussian(value: string) {
@@ -330,6 +336,12 @@ export function getCsjPowertrain(vehicle: CsjCatalogVehicle) {
 
 export function getCsjSearchText(vehicle: CsjCatalogVehicle) {
   const brand = csjBrandNames[vehicle.makeZh];
+  const source = [vehicle.modelZh, ...(vehicle.descriptions || []), ...Object.values(vehicle.details || {})].join(" ");
+  const bodyAliases = /2门|两门/u.test(source)
+    ? ["3 двери", "трехдверный", "трёхдверный", "3-door", "coupe"]
+    : /4门|四门/u.test(source)
+      ? ["5 дверей", "пятидверный", "5-door"]
+      : /敞篷/u.test(source) ? ["кабриолет", "convertible"] : [];
   return [
     vehicle.code,
     vehicle.makeZh,
@@ -346,6 +358,7 @@ export function getCsjSearchText(vehicle: CsjCatalogVehicle) {
     ...Object.values(vehicle.details || {}),
     ...Object.values(vehicle.details || {}).map(getCsjDescription),
     getCsjPowertrain(vehicle),
+    ...bodyAliases,
   ]
     .filter(Boolean)
     .join(" ")

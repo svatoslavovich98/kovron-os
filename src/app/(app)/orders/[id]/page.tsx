@@ -15,6 +15,7 @@ import { isFinishedPhoto } from "@/lib/order-media";
 import { ReceivePaymentDialog } from "@/components/receive-payment-dialog";
 import { PayContractorDialog } from "@/components/pay-contractor-dialog";
 import { LayoutImageViewer } from "@/components/layout-image-viewer";
+import { ModalPortal } from "@/components/ui/modal-portal";
 import type { OrderStatus } from "@/lib/types";
 import {
   ArrowLeft, Phone, MessageCircle, Calendar, Clock,
@@ -78,38 +79,23 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
   return (
     <div className="p-4 lg:p-6 max-w-3xl mx-auto space-y-4">
       {/* Header */}
-      <div className="flex items-center gap-3">
-        <Link href="/orders" className="p-2 rounded-sm hover:bg-card transition-colors">
-          <ArrowLeft className="h-5 w-5" />
-        </Link>
-        <div className="flex-1">
-          <h1 className="text-xl font-bold">Заказ №{order.number}</h1>
-          <p className="text-sm text-muted-foreground">
-            {car?.brand} {car?.model} {car?.generation}
-          </p>
+      <div className="space-y-3">
+        <div className="flex items-start gap-2.5">
+          <Link href="/orders" className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-sm hover:bg-card transition-colors"><ArrowLeft className="h-5 w-5" /></Link>
+          <div className="min-w-0 flex-1">
+            <h1 className="break-all text-lg font-bold leading-tight sm:text-xl">Заказ №{order.number}</h1>
+            <p className="mt-1 text-sm text-muted-foreground">{car?.brand} {car?.model} {car?.generation}</p>
+          </div>
         </div>
-        <div className="relative shrink-0">
-          <select
-            value={order.status}
-            onChange={(event) => changeStatus(event.target.value as OrderStatus)}
-            disabled={updatingStatus}
-            className="appearance-none rounded-md border bg-card py-2 pl-3 pr-9 text-xs font-semibold outline-none cursor-pointer disabled:opacity-60"
-            style={{ color: statusConfig?.color, borderColor: `${statusConfig?.color}66` }}
-            aria-label="Изменить статус заказа"
-          >
-            {[...statuses].sort((a, b) => a.order - b.order).map((status) => (
-              <option key={status.key} value={status.key}>{status.label}</option>
-            ))}
-          </select>
-          {updatingStatus
-            ? <Loader2 className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin" />
-            : <ChevronsUpDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2" />}
+        <div className="flex w-full items-center gap-2">
+          <div className="relative min-w-0 flex-1">
+            <select value={order.status} onChange={(event) => changeStatus(event.target.value as OrderStatus)} disabled={updatingStatus} className="h-11 w-full appearance-none rounded-md border bg-card py-2 pl-3 pr-9 text-xs font-semibold outline-none cursor-pointer disabled:opacity-60" style={{ color: statusConfig?.color, borderColor: `${statusConfig?.color}66` }} aria-label="Изменить статус заказа">{[...statuses].sort((a, b) => a.order - b.order).map((status) => <option key={status.key} value={status.key}>{status.label}</option>)}</select>
+            {updatingStatus ? <Loader2 className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin" /> : <ChevronsUpDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2" />}
+          </div>
+          <Link href={`/orders/${order.id}/edit`} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md border border-border bg-card hover:border-primary/40 transition-colors" title="Редактировать заказ"><Pencil className="h-4 w-4" /></Link>
+          <button onClick={() => window.print()} className="print-hide flex h-11 w-11 shrink-0 items-center justify-center rounded-md border border-border bg-card hover:border-primary/40 transition-colors" title="Печать заказа"><Printer className="h-4 w-4" /></button>
+          <button onClick={() => setShowDelete(true)} className="print-hide flex h-11 w-11 shrink-0 items-center justify-center rounded-md border border-expense/30 bg-card text-expense hover:bg-expense/10 transition-colors" title="Удалить ошибочный заказ"><Trash2 className="h-4 w-4" /></button>
         </div>
-        <Link href={`/orders/${order.id}/edit`} className="p-2 rounded-sm border border-border bg-card hover:border-primary/40 transition-colors" title="Редактировать заказ">
-          <Pencil className="h-4 w-4" />
-        </Link>
-        <button onClick={() => window.print()} className="print-hide p-2 rounded-sm border border-border bg-card hover:border-primary/40 transition-colors" title="Печать заказа"><Printer className="h-4 w-4" /></button>
-        <button onClick={() => setShowDelete(true)} className="print-hide p-2 rounded-sm border border-expense/30 bg-card text-expense hover:bg-expense/10 transition-colors" title="Удалить ошибочный заказ"><Trash2 className="h-4 w-4" /></button>
       </div>
 
       {/* Client */}
@@ -298,9 +284,9 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
       )}
 
       {showDelete && (
-        <div className="fixed inset-0 z-[190] flex items-end sm:items-center justify-center sm:p-4">
+        <ModalPortal><div className="fixed inset-0 z-[500] flex items-end sm:items-center justify-center sm:p-4">
           <button className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => !deleting && setShowDelete(false)} aria-label="Закрыть" />
-          <div className="relative w-full sm:max-w-md rounded-t-xl sm:rounded-xl border border-border bg-card p-5 shadow-2xl">
+          <div className="app-dialog-height relative w-full overflow-y-auto sm:max-w-md rounded-t-xl sm:rounded-xl border border-border bg-card p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] shadow-2xl">
             <div className="flex items-start gap-3">
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-expense/10 text-expense"><AlertTriangle className="h-5 w-5" /></div>
               <div>
@@ -332,7 +318,7 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
               </Button>
             </div>
           </div>
-        </div>
+        </div></ModalPortal>
       )}
 
       {orderEdits.length > 0 && (

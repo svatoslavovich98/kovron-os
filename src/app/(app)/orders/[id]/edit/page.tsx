@@ -15,6 +15,7 @@ import { kitLabels } from "@/lib/demo-data";
 import { cn, formatCurrency } from "@/lib/utils";
 import { isFinishedPhoto, isCarViewPhoto } from "@/lib/order-media";
 import type { KitType } from "@/lib/types";
+import { ModalPortal } from "@/components/ui/modal-portal";
 
 function withTimeout<T>(promise: Promise<T>, milliseconds: number): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -119,8 +120,19 @@ export default function EditOrderPage({ params }: { params: { id: string } }) {
     setMessage(null);
   };
 
-  const applyCatalogCar = (brand: string, model: string, suggestedYear?: number) => {
-    setForm(prev => ({ ...prev, carBrand: brand, carModel: model, carYear: suggestedYear ? String(suggestedYear) : prev.carYear }));
+  const applyCatalogCar = (brand: string, model: string) => {
+    setForm(prev => ({ ...prev, carBrand: brand, carModel: model }));
+    setDirty(true);
+    setMessage(null);
+  };
+
+  const applyCatalogDetails = (details: { generation?: string; year?: string; body?: string }) => {
+    setForm(prev => ({
+      ...prev,
+      carGeneration: details.generation ?? prev.carGeneration,
+      carYear: details.year ?? prev.carYear,
+      carBody: details.body ?? prev.carBody,
+    }));
     setDirty(true);
     setMessage(null);
   };
@@ -240,7 +252,7 @@ export default function EditOrderPage({ params }: { params: { id: string } }) {
   }
 
   return (
-    <div className="p-4 lg:p-6 max-w-4xl mx-auto space-y-4 pb-28">
+    <div className="p-4 lg:p-6 max-w-4xl mx-auto space-y-4 pb-36 lg:pb-28">
       <div className="flex items-center gap-3">
         <button type="button" onClick={requestExit} className="p-2 rounded-sm hover:bg-card" aria-label="Вернуться к заказу"><ArrowLeft className="h-5 w-5" /></button>
         <div className="flex-1">
@@ -269,16 +281,14 @@ export default function EditOrderPage({ params }: { params: { id: string } }) {
         <CarCatalogPicker
           brand={form.carBrand}
           model={form.carModel}
+          generation={form.carGeneration}
           year={form.carYear}
+          body={form.carBody}
           onCarChange={applyCatalogCar}
+          onDetailsChange={applyCatalogDetails}
           onMediaFound={applyCatalogMedia}
         />
-        <div className="grid sm:grid-cols-2 gap-3">
-          <Field label="Поколение"><Input value={form.carGeneration} onChange={e => update("carGeneration", e.target.value)} /></Field>
-          <Field label="Год"><Input type="number" value={form.carYear} onChange={e => update("carYear", e.target.value)} /></Field>
-          <Field label="Кузов"><Input value={form.carBody} onChange={e => update("carBody", e.target.value)} /></Field>
-          <Field label="Госномер"><Input value={form.carPlateNumber} onChange={e => update("carPlateNumber", e.target.value)} /></Field>
-        </div>
+        <Field label="Госномер"><Input value={form.carPlateNumber} onChange={e => update("carPlateNumber", e.target.value)} /></Field>
       </CardContent></Card>
 
       <Card><CardContent className="p-4 space-y-4">
@@ -346,7 +356,7 @@ export default function EditOrderPage({ params }: { params: { id: string } }) {
         <PayContractorDialog order={order} />
       </CardContent></Card>
 
-      <div className="fixed bottom-16 lg:bottom-4 left-4 right-4 lg:left-auto z-40 flex justify-end pointer-events-none">
+      <div className="fixed bottom-[calc(5rem+env(safe-area-inset-bottom))] lg:bottom-4 left-4 right-4 lg:left-auto z-40 flex justify-end pointer-events-none">
         <Button onClick={() => void save()} disabled={saving || !dirty} className="pointer-events-auto shadow-xl min-w-44">
           {saving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
           {saving ? "Сохранение…" : dirty ? "Сохранить" : "Сохранено"}
@@ -354,9 +364,9 @@ export default function EditOrderPage({ params }: { params: { id: string } }) {
       </div>
 
       {showLeaveConfirm && (
-        <div className="fixed inset-0 z-[190] flex items-end sm:items-center justify-center sm:p-4">
+        <ModalPortal><div className="fixed inset-0 z-[500] flex items-end sm:items-center justify-center sm:p-4">
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowLeaveConfirm(false)} />
-          <div className="relative w-full sm:max-w-md rounded-t-lg sm:rounded-lg border border-border bg-card p-5 shadow-2xl">
+          <div className="app-dialog-height relative w-full overflow-y-auto sm:max-w-md rounded-t-lg sm:rounded-lg border border-border bg-card p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] shadow-2xl">
             <h2 className="text-lg font-bold">Изменения ещё не сохранены</h2>
             <p className="text-sm text-muted-foreground mt-2">Если выйти, введённые данные останутся черновиком на этом устройстве. Вы сможете вернуться и продолжить.</p>
             <div className="grid grid-cols-2 gap-3 mt-5">
@@ -364,17 +374,17 @@ export default function EditOrderPage({ params }: { params: { id: string } }) {
               <Button onClick={() => setShowLeaveConfirm(false)}>Остаться</Button>
             </div>
           </div>
-        </div>
+        </div></ModalPortal>
       )}
 
       {saving && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-background/85 backdrop-blur-sm p-6">
+        <ModalPortal><div className="fixed inset-0 z-[500] flex items-center justify-center bg-background/85 backdrop-blur-sm p-6">
           <div className="w-full max-w-sm rounded-lg border border-border bg-card p-6 text-center shadow-2xl">
             <Loader2 className="h-9 w-9 mx-auto animate-spin text-primary" />
             <p className="font-semibold mt-4">{savingLabel}</p>
             <p className="text-sm text-muted-foreground mt-2">Не закрывайте страницу. Обычно это занимает несколько секунд.</p>
           </div>
-        </div>
+        </div></ModalPortal>
       )}
     </div>
   );

@@ -17,6 +17,7 @@ import {
   Calendar, Wallet, ChevronRight, Check, Search, Plus, X,
 } from "lucide-react";
 import Link from "next/link";
+import { ModalPortal } from "@/components/ui/modal-portal";
 
 const steps = [
   { key: "client", label: "Клиент", icon: User },
@@ -139,8 +140,20 @@ export default function NewOrderPage() {
     setSaveError(null);
   };
 
-  const applyCatalogCar = (brand: string, model: string, suggestedYear?: number) => {
-    setForm(prev => ({ ...prev, carBrand: brand, carModel: model, carYear: suggestedYear ? String(suggestedYear) : prev.carYear, existingCarId: "" }));
+  const applyCatalogCar = (brand: string, model: string) => {
+    setForm(prev => ({ ...prev, carBrand: brand, carModel: model, existingCarId: "" }));
+    setDirty(true);
+    setSaveError(null);
+  };
+
+  const applyCatalogDetails = (details: { generation?: string; year?: string; body?: string }) => {
+    setForm(prev => ({
+      ...prev,
+      carGeneration: details.generation ?? prev.carGeneration,
+      carYear: details.year ?? prev.carYear,
+      carBody: details.body ?? prev.carBody,
+      existingCarId: "",
+    }));
     setDirty(true);
     setSaveError(null);
   };
@@ -167,6 +180,26 @@ export default function NewOrderPage() {
     }));
     setDirty(true);
     setSaveError(null);
+  };
+
+  const moveToStep = (nextStep: number) => {
+    if (nextStep > step) {
+      if (step === 0 && (!form.clientName.trim() || !form.clientPhone.trim())) {
+        setSaveError("Сначала укажите имя и телефон клиента");
+        return;
+      }
+      if (step === 1 && (!form.carBrand.trim() || !form.carModel.trim())) {
+        setSaveError("Выберите автомобиль из каталога или введите свой вариант вручную");
+        return;
+      }
+      if (step === 2 && !form.kitTypes.length) {
+        setSaveError("Выберите комплект ковриков");
+        return;
+      }
+    }
+    setSaveError(null);
+    setStep(Math.max(0, Math.min(steps.length - 1, nextStep)));
+    document.querySelector<HTMLElement>(".app-scroll")?.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   const selectClient = (client: Client, markDirty = true) => {
@@ -421,7 +454,7 @@ export default function NewOrderPage() {
   };
 
   return (
-    <div className="p-4 lg:p-6 max-w-3xl mx-auto space-y-4">
+    <div className="p-4 lg:p-6 max-w-3xl mx-auto space-y-4 pb-32 lg:pb-8">
       {/* Header */}
       <div className="flex items-center gap-3">
         <Link href="/orders" className="p-2 rounded-sm hover:bg-card transition-colors">
@@ -431,11 +464,15 @@ export default function NewOrderPage() {
       </div>
 
       {/* Step indicator */}
+      <div className="flex items-center justify-between rounded-lg border border-border bg-card px-4 py-3">
+        <div><p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Шаг {step + 1} из {steps.length}</p><p className="mt-0.5 font-bold">{steps[step].label}</p></div>
+        <div className="text-sm font-bold text-primary">{Math.round(((step + 1) / steps.length) * 100)}%</div>
+      </div>
       <div className="flex gap-1 overflow-x-auto pb-1" style={{ scrollbarWidth: "none" }}>
         {steps.map((s, i) => (
           <button
             key={s.key}
-            onClick={() => setStep(i)}
+            onClick={() => moveToStep(i)}
             className={cn(
               "flex items-center gap-1.5 px-3 py-2 rounded-sm text-xs font-medium shrink-0 transition-all",
               i === step
@@ -556,30 +593,14 @@ export default function NewOrderPage() {
                 <CarCatalogPicker
                   brand={form.carBrand}
                   model={form.carModel}
+                  generation={form.carGeneration}
                   year={form.carYear}
+                  body={form.carBody}
                   onCarChange={applyCatalogCar}
+                  onDetailsChange={applyCatalogDetails}
                   onMediaFound={applyCatalogMedia}
                 />
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-sm text-muted-foreground mb-1 block">Поколение</label>
-                    <Input placeholder="" value={form.carGeneration} onChange={(e) => updateForm("carGeneration", e.target.value)} />
-                  </div>
-                  <div>
-                    <label className="text-sm text-muted-foreground mb-1 block">Год выпуска</label>
-                    <Input placeholder="" type="number" value={form.carYear} onChange={(e) => updateForm("carYear", e.target.value)} />
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-sm text-muted-foreground mb-1 block">Кузов</label>
-                    <Input placeholder="" value={form.carBody} onChange={(e) => updateForm("carBody", e.target.value)} />
-                  </div>
-                  <div>
-                    <label className="text-sm text-muted-foreground mb-1 block">Гос. номер</label>
-                    <Input placeholder="" value={form.carPlateNumber} onChange={(e) => updateForm("carPlateNumber", e.target.value)} />
-                  </div>
-                </div>
+                <div><label className="text-sm text-muted-foreground mb-1 block">Гос. номер</label><Input placeholder="Необязательно" value={form.carPlateNumber} onChange={(e) => updateForm("carPlateNumber", e.target.value)} /></div>
                 </>}
               </div>
             </>
@@ -663,19 +684,19 @@ export default function NewOrderPage() {
             <>
               <h2 className="font-semibold text-lg">Сроки и производство</h2>
               <div className="space-y-3">
-                <div>
+                <div className="min-w-0">
                   <label className="text-sm text-muted-foreground mb-1 block">Желаемая дата готовности</label>
-                  <Input type="date" value={form.desiredDate} onChange={(e) => updateForm("desiredDate", e.target.value)} />
+                  <Input type="date" value={form.desiredDate} onChange={(e) => updateForm("desiredDate", e.target.value)} className="h-12 w-full min-w-0 max-w-full" />
                 </div>
                 <div>
                   <label className="text-sm text-muted-foreground mb-1 block">Исполнитель</label>
-                  <div className="flex gap-2">
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                     {users.filter((u) => u.role === "seamstress").map((u) => (
                       <button
                         key={u.id}
                         onClick={() => updateForm("assigneeId", u.id)}
                         className={cn(
-                          "flex items-center gap-2 px-4 py-3 rounded-md border text-sm transition-all",
+                          "flex w-full items-center gap-2 px-4 py-3 rounded-md border text-sm transition-all",
                           form.assigneeId === u.id
                             ? "border-primary bg-primary/5"
                             : "border-border hover:border-primary/30"
@@ -691,7 +712,7 @@ export default function NewOrderPage() {
                 </div>
                 <div>
                   <label className="text-sm text-muted-foreground mb-1 block">Приоритет</label>
-                  <div className="flex gap-2">
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                     {[
                       { key: "low", label: "Низкий" },
                       { key: "normal", label: "Обычный" },
@@ -702,7 +723,7 @@ export default function NewOrderPage() {
                         key={p.key}
                         onClick={() => updateForm("priority", p.key)}
                         className={cn(
-                          "px-3 py-1.5 rounded-full text-xs font-medium border transition-all",
+                          "min-h-10 px-3 py-2 rounded-md text-xs font-medium border transition-all",
                           form.priority === p.key
                             ? "bg-primary text-primary-foreground border-primary"
                             : "border-border text-muted-foreground"
@@ -836,14 +857,14 @@ export default function NewOrderPage() {
       {/* Navigation buttons */}
       {draftRestored && <div className="rounded-md border border-primary/30 bg-primary/5 p-3 text-sm"><p className="font-medium text-primary">Черновик заказа восстановлен</p><p className="text-xs text-muted-foreground mt-0.5">Можно продолжить с того места, где сохранение прервалось.</p></div>}
       {saveError && <div className="rounded-md border border-expense/30 bg-expense/10 p-3 text-sm text-expense">{saveError}</div>}
-      <div className="flex gap-3">
+      <div className="hidden gap-3 lg:flex">
         {step > 0 && (
-          <Button variant="outline" onClick={() => setStep(step - 1)} className="flex-1">
+          <Button variant="outline" onClick={() => moveToStep(step - 1)} className="flex-1">
             Назад
           </Button>
         )}
         {step < steps.length - 1 ? (
-          <Button onClick={() => setStep(step + 1)} className="flex-1">
+          <Button onClick={() => moveToStep(step + 1)} className="flex-1">
             Далее
             <ChevronRight className="h-4 w-4 ml-1" />
           </Button>
@@ -855,8 +876,15 @@ export default function NewOrderPage() {
         )}
       </div>
 
+      <div className="app-fixed-safe fixed bottom-[calc(4rem+env(safe-area-inset-bottom))] z-40 border-t border-border bg-card/95 p-3 backdrop-blur-xl lg:hidden">
+        <div className="mx-auto flex max-w-3xl gap-2">
+          {step > 0 && <Button type="button" variant="outline" onClick={() => moveToStep(step - 1)} className="h-12 flex-1">Назад</Button>}
+          {step < steps.length - 1 ? <Button type="button" onClick={() => moveToStep(step + 1)} className="h-12 flex-1">Далее<ChevronRight className="ml-1 h-4 w-4" /></Button> : <Button type="button" onClick={handleSave} disabled={saving} className="h-12 flex-1"><Check className="mr-1 h-4 w-4" />{saving ? "Сохранение…" : "Создать заказ"}</Button>}
+        </div>
+      </div>
+
       {saving && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-background/85 backdrop-blur-sm p-6">
+        <ModalPortal><div className="fixed inset-0 z-[500] flex items-center justify-center bg-background/85 backdrop-blur-sm p-6">
           <div className="w-full max-w-sm rounded-lg border border-border bg-card p-6 text-center shadow-2xl">
             {savedNumber ? (
               <>
@@ -882,7 +910,7 @@ export default function NewOrderPage() {
               </>
             )}
           </div>
-        </div>
+        </div></ModalPortal>
       )}
     </div>
   );
