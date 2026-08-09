@@ -85,6 +85,7 @@ export function CarCatalogPicker({
 }: CarCatalogPickerProps) {
   const [mode, setMode] = useState<"search" | "lists" | "manual">("search");
   const [query, setQuery] = useState("");
+  const [committedQuery, setCommittedQuery] = useState("");
   const [searchResults, setSearchResults] = useState<CatalogMatch[]>([]);
   const [searching, setSearching] = useState(false);
   const [makes, setMakes] = useState<CatalogOption[]>([]);
@@ -122,6 +123,11 @@ export function CarCatalogPicker({
 
   useEffect(() => {
     const trimmed = query.trim();
+    if (trimmed && trimmed === committedQuery) {
+      setSearchResults([]);
+      setSearching(false);
+      return;
+    }
     if (trimmed.length < 2) {
       setSearchResults([]);
       setSearching(false);
@@ -145,7 +151,7 @@ export function CarCatalogPicker({
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [query]);
+  }, [query, committedQuery]);
 
   const groupedSearchResults = useMemo(() => {
     const groups = new Map<string, CatalogMatch>();
@@ -258,7 +264,9 @@ export function CarCatalogPicker({
   const selectSearchResult = (result: CatalogMatch) => {
     const requestedYear = Number(query.match(/\b(?:19|20)\d{2}\b/u)?.[0] || 0);
     selectedCodeRef.current = result.code;
-    setQuery(`${result.make} ${result.modelEn}${requestedYear ? ` ${requestedYear}` : ""}`);
+    const nextQuery = `${result.make} ${result.modelEn}${requestedYear ? ` ${requestedYear}` : ""}`;
+    setCommittedQuery(nextQuery);
+    setQuery(nextQuery);
     setSearchResults([]);
     setVariantsOpen(true);
     applyVariant(result, requestedYear && result.years.includes(requestedYear) ? requestedYear : undefined);
@@ -318,7 +326,7 @@ export function CarCatalogPicker({
             <span className="mb-1 block text-sm text-muted-foreground">Марка, модель, год или тип кузова</span>
             <div className="relative">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <input value={query} onChange={event => setQuery(event.target.value)} placeholder="Например: Evoque 3 двери 2012" autoComplete="off" className="h-12 w-full rounded-md border border-border bg-background pl-10 pr-10 text-base outline-none focus:border-primary focus:ring-2 focus:ring-primary/15" />
+              <input value={query} onChange={event => { setCommittedQuery(""); setQuery(event.target.value); }} placeholder="Например: Evoque 3 двери 2012" autoComplete="off" className="h-12 w-full rounded-md border border-border bg-background pl-10 pr-10 text-base outline-none focus:border-primary focus:ring-2 focus:ring-primary/15" />
               {searching && <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-primary" />}
             </div>
           </label>
