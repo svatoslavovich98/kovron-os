@@ -5,6 +5,7 @@ import { useAuth } from "@/lib/auth-context";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { ModalPortal } from "@/components/ui/modal-portal";
 import { formatCurrency, formatDateTime, cn } from "@/lib/utils";
 import { useData } from "@/lib/data-context";
 import type { Transaction } from "@/lib/types";
@@ -457,10 +458,10 @@ export default function FinancePage() {
 
       {/* Правка или удаление уже проведённой операции */}
       {editTx && (
-        <div className="fixed inset-0 z-[75] flex items-end lg:items-center justify-center" onClick={() => !editSaving && closeEdit()}>
+        <ModalPortal><div className="fixed inset-0 z-[500] flex items-end lg:items-center justify-center lg:p-4" onClick={() => !editSaving && closeEdit()}>
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
           <div
-            className="relative w-full max-w-md rounded-t-2xl lg:rounded-lg border border-border bg-card p-5 shadow-2xl"
+            className="app-dialog-height relative w-full max-w-md overflow-y-auto rounded-t-2xl lg:rounded-lg border border-border bg-card p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] shadow-2xl"
             onClick={e => e.stopPropagation()}
           >
             <div className="flex items-start justify-between gap-3">
@@ -514,7 +515,7 @@ export default function FinancePage() {
 
                 {editError && <p className="text-sm text-expense">{editError}</p>}
 
-                <div className="flex gap-2 pt-1">
+                <div className="sticky bottom-0 -mx-5 flex gap-2 border-t border-border bg-card px-5 pb-[max(0.25rem,env(safe-area-inset-bottom))] pt-3">
                   <Button variant="outline" className="flex-1 text-expense" disabled={editSaving} onClick={() => { setEditError(""); setConfirmDelete(true); }}>
                     <Trash2 className="h-4 w-4 mr-1.5" />
                     Удалить
@@ -527,7 +528,7 @@ export default function FinancePage() {
               </div>
             )}
           </div>
-        </div>
+        </div></ModalPortal>
       )}
 
       {/* Modal overlay for adding income/expense/transfer */}

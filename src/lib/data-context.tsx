@@ -537,9 +537,7 @@ function useDemoData(): AppData {
   const deleteOrder = useCallback(async (id: string, reason: string) => {
     const order = orders.find(item => item.id === id);
     if (!order) return { ok: false, error: "Заказ не найден" };
-    if (order.paid > 0 || transactions.some(item => item.orderId === id)) {
-      return { ok: false, error: "У заказа есть финансовые операции. Сначала оформите возврат или удалите ошибочную оплату." };
-    }
+    setTransactions(prev => prev.filter(item => item.orderId !== id));
     setOrders(prev => prev.filter(item => item.id !== id));
     if (user) {
       setAuditLog(prev => [{
@@ -549,7 +547,7 @@ function useDemoData(): AppData {
       }, ...prev]);
     }
     return { ok: true };
-  }, [orders, transactions, user]);
+  }, [orders, user]);
 
   const createClient = useCallback(async (c: Partial<Client>) => {
     const client = { ...c, id: `client_${Date.now()}`, createdAt: new Date().toISOString() } as Client;
@@ -1311,9 +1309,32 @@ function useSupabaseData(): AppData {
     if (!sb || !user) return { ok: false, error: "Нет соединения с базой" };
     const order = data.orders.find(item => item.id === id);
     if (!order) return { ok: false, error: "Заказ не найден" };
-    if (order.paid > 0 || data.transactions.some(item => item.orderId === id)) {
-      return { ok: false, error: "У заказа есть финансовые операции. Сначала оформите возврат или удалите ошибочную оплату." };
+
+    // Сначала удаляем все связанные проводки через ту же серверную функцию,
+    // что используется в разделе «Финансы». Она возвращает деньги из операции
+    // в правильную кассу и пересчитывает оплаченную сумму заказа.
+    const { data: linkedTransactions, error: linkedError } = await sb
+      .from("transactions")
+      .select("id")
+      .eq("order_id", id);
+    if (linkedError) return { ok: false, error: linkedError.message };
+
+    for (const transaction of linkedTransactions || []) {
+      const { error: transactionError } = await sb.rpc("delete_transaction", {
+        p_id: transaction.id,
+        p_reason: `Автоматически удалено вместе с заказом №${order.number}`,
+      });
+      if (transactionError) {
+        return {
+          ok: false,
+          error: `Не удалось удалить связанную финансовую операцию: ${transactionError.message}`,
+        };
+      }
     }
+
+    // Удаляем и ещё не синхронизированные локальные операции этого заказа,
+    // чтобы они не появились снова после фоновой отправки.
+    writeFinanceOutbox(readFinanceOutbox().filter(item => item.orderId !== id));
 
     const { error: rpcError } = await sb.rpc("delete_order", {
       p_order_id: id,
@@ -1351,11 +1372,16 @@ function useSupabaseData(): AppData {
     setData(prev => ({
       ...prev,
       orders: prev.orders.filter(item => item.id !== id),
+      transactions: prev.transactions.filter(item => item.orderId !== id),
+      accounts: applyLedgerBalances(
+        prev.accounts,
+        prev.transactions.filter(item => item.orderId !== id),
+      ),
       seamstressPayments: prev.seamstressPayments.filter(item => item.orderId !== id),
       notifications: prev.notifications.map(item => item.orderId === id ? { ...item, orderId: undefined } : item),
     }));
     return { ok: true };
-  }, [data.orders, data.transactions, data.clients, data.cars, user]);
+  }, [data.orders, data.clients, data.cars, user]);
 
   const createClient = useCallback(async (c: Partial<Client>): Promise<Client | null> => {
     const sb = getSupabase();

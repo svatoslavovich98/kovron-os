@@ -294,26 +294,24 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
                 <p className="mt-1 text-sm text-muted-foreground">Заказ исчезнет из рабочих списков, а причина удаления останется в журнале действий. Администратор сможет найти архивную копию в корзине.</p>
               </div>
             </div>
-            {order.paid > 0 ? (
-              <div className="mt-4 rounded-md border border-expense/30 bg-expense/10 p-3 text-sm text-expense">
-                Удаление заблокировано: по заказу получено {formatCurrency(order.paid)}. Сначала оформите возврат или исправьте ошибочную оплату.
-              </div>
-            ) : (
-              <label className="mt-4 block">
-                <span className="mb-1.5 block text-sm font-medium">Причина удаления</span>
-                <textarea
-                  value={deleteReason}
-                  onChange={(event) => { setDeleteReason(event.target.value); setDeleteError(""); }}
-                  placeholder="Например: заказ создан по ошибке или продублирован"
-                  rows={3}
-                  className="w-full resize-none rounded-md border border-border bg-background p-3 text-sm outline-none focus:border-primary"
-                />
-              </label>
-            )}
+            <div className="mt-4 rounded-md border border-primary/30 bg-primary/10 p-3 text-sm">
+              Связанные с заказом финансовые операции будут удалены автоматически, а баланс касс пересчитается.
+              {order.paid > 0 && <> Сейчас по заказу получено {formatCurrency(order.paid)}.</>}
+            </div>
+            <label className="mt-4 block">
+              <span className="mb-1.5 block text-sm font-medium">Причина удаления</span>
+              <textarea
+                value={deleteReason}
+                onChange={(event) => { setDeleteReason(event.target.value); setDeleteError(""); }}
+                placeholder="Например: заказ создан по ошибке или продублирован"
+                rows={3}
+                className="w-full resize-none rounded-md border border-border bg-background p-3 text-sm outline-none focus:border-primary"
+              />
+            </label>
             {deleteError && <p className="mt-3 text-sm text-expense">{deleteError}</p>}
             <div className="mt-5 grid grid-cols-2 gap-3">
               <Button variant="outline" onClick={() => setShowDelete(false)} disabled={deleting}>Отмена</Button>
-              <Button onClick={() => void confirmDelete()} disabled={deleting || order.paid > 0} className="bg-expense text-white hover:bg-expense/90">
+              <Button onClick={() => void confirmDelete()} disabled={deleting} className="bg-expense text-white hover:bg-expense/90">
                 {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <><Trash2 className="mr-2 h-4 w-4" />Удалить</>}
               </Button>
             </div>
