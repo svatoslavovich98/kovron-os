@@ -2,7 +2,6 @@ import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 import { Providers } from "./providers";
-import { ViewportSync } from "@/components/viewport-sync";
 import { PortraitGuard } from "@/components/portrait-guard";
 
 const inter = Inter({
@@ -53,7 +52,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
       </head>
       <body className={`${inter.variable} font-sans`}>
-        <ViewportSync />
         <PortraitGuard />
         <Providers>{children}</Providers>
       </body>

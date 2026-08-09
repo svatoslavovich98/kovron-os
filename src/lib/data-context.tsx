@@ -886,10 +886,8 @@ function useSupabaseData(): AppData {
       if (document.visibilityState === "visible") scheduleSync();
     };
 
-    window.addEventListener("focus", scheduleSync);
     window.addEventListener("online", scheduleSync);
     document.addEventListener("visibilitychange", syncWhenVisible);
-    const interval = window.setInterval(syncWhenVisible, 30000);
     const channel = sb?.channel(`kovron-core-sync-${user.id}`)
       .on("postgres_changes", { event: "*", schema: "public", table: "orders" }, scheduleSync)
       .on("postgres_changes", { event: "*", schema: "public", table: "clients" }, scheduleSync)
@@ -898,8 +896,6 @@ function useSupabaseData(): AppData {
 
     return () => {
       window.clearTimeout(debounceTimer);
-      window.clearInterval(interval);
-      window.removeEventListener("focus", scheduleSync);
       window.removeEventListener("online", scheduleSync);
       document.removeEventListener("visibilitychange", syncWhenVisible);
       if (channel && sb) void sb.removeChannel(channel);
@@ -1499,11 +1495,9 @@ function useSupabaseData(): AppData {
     void flush();
     window.addEventListener("online", retry);
     window.addEventListener("focus", retry);
-    const interval = window.setInterval(retry, 30000);
     return () => {
       window.removeEventListener("online", retry);
       window.removeEventListener("focus", retry);
-      window.clearInterval(interval);
     };
   }, [user]);
 

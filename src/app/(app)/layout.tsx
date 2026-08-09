@@ -13,7 +13,6 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Avatar } from "@/components/ui/avatar";
-import { VIEWPORT_EVENT } from "@/components/viewport-sync";
 
 const mainNav = [
   { href: "/dashboard", label: "Главная", icon: Home },
@@ -50,21 +49,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     if (!loading && !user) router.replace("/login");
     if (!loading && user?.role === "seamstress") router.replace("/seamstress");
   }, [user, loading, router]);
-
-  useEffect(() => {
-    const restoreScroll = () => {
-      const container = scrollContainerRef.current;
-      if (!container) return;
-      const top = container.scrollTop;
-      container.scrollLeft = 0;
-      requestAnimationFrame(() => {
-        const maxTop = Math.max(0, container.scrollHeight - container.clientHeight);
-        container.scrollTo({ left: 0, top: Math.min(top, maxTop), behavior: "auto" });
-      });
-    };
-    document.addEventListener(VIEWPORT_EVENT, restoreScroll);
-    return () => document.removeEventListener(VIEWPORT_EVENT, restoreScroll);
-  }, []);
 
   if (loading || !user || user.role === "seamstress") {
     return (

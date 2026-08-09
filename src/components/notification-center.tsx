@@ -2,12 +2,11 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { Bell, CheckCheck, Clock3, CreditCard, PackageCheck, Smartphone, Sparkles, X } from "lucide-react";
+import { Bell, CheckCheck, Clock3, CreditCard, PackageCheck, Sparkles, X } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { useData } from "@/lib/data-context";
 import { cn, formatCurrency, formatDate, formatDateTime } from "@/lib/utils";
 import { appReleases } from "@/lib/app-releases";
-import { Button } from "@/components/ui/button";
 
 type AlertItem = {
   id: string;
@@ -35,21 +34,8 @@ export function NotificationCenter() {
   const { orders, cars, clients, statuses, notifications, markNotificationRead, markAllNotificationsRead } = useData();
   const [open, setOpen] = useState(false);
   const [dismissed, setDismissed] = useState<string[]>([]);
-  const [phonePermission, setPhonePermission] = useState<NotificationPermission | "unsupported">("unsupported");
   const rootRef = useRef<HTMLDivElement>(null);
   const storageKey = `kovron-read-alerts:${user?.id || "guest"}`;
-  const phoneSeenKey = `kovron-phone-seen:${user?.id || "guest"}`;
-
-  useEffect(() => {
-    if (!("Notification" in window) || !("serviceWorker" in navigator)) {
-      setPhonePermission("unsupported");
-      return;
-    }
-    setPhonePermission(Notification.permission);
-    if (Notification.permission === "granted") {
-      void navigator.serviceWorker.register("/sw.js");
-    }
-  }, []);
 
   useEffect(() => {
     try {
@@ -71,13 +57,16 @@ export function NotificationCenter() {
     const now = new Date();
     const today = now.toISOString().slice(0, 10);
     const result: AlertItem[] = [];
+    const carById = new Map(cars.map(item => [item.id, item]));
+    const clientById = new Map(clients.map(item => [item.id, item]));
+    const statusByKey = new Map(statuses.map(item => [item.key, item]));
     for (const order of orders) {
       if (order.status === "cancelled") continue;
       const isActive = order.status !== "completed" && order.status !== "delivered";
-      const car = cars.find(item => item.id === order.carId);
-      const client = clients.find(item => item.id === order.clientId);
+      const car = carById.get(order.carId);
+      const client = clientById.get(order.clientId);
       const carName = car ? `${car.brand} ${car.model}` : `заказ №${order.number}`;
-      const statusName = statuses.find(item => item.key === order.status)?.label || order.status;
+      const statusName = statusByKey.get(order.status)?.label || order.status;
       const details = [
         client ? `Клиент: ${client.name}${client.phone ? ` · ${client.phone}` : ""}` : "",
         `Автомобиль: ${carName}`,
@@ -178,46 +167,6 @@ export function NotificationCenter() {
 
   const unreadCount = items.filter(item => !item.read).length;
 
-  const enablePhoneNotifications = async () => {
-    if (!("Notification" in window) || !("serviceWorker" in navigator)) {
-      setPhonePermission("unsupported");
-      return;
-    }
-    const permission = await Notification.requestPermission();
-    setPhonePermission(permission);
-    if (permission !== "granted") return;
-    const registration = await navigator.serviceWorker.register("/sw.js");
-    await registration.showNotification("KOVRON OS", {
-      body: "Уведомления на телефоне включены. Здесь будут сроки, оплаты, готовые заказы и новости приложения.",
-      icon: "/icons/icon.svg",
-      badge: "/icons/icon.svg",
-      tag: "kovron-phone-enabled",
-      data: { url: "/dashboard" },
-    });
-    try { localStorage.setItem(phoneSeenKey, JSON.stringify(items.map(item => item.id).slice(0, 300))); } catch {}
-  };
-
-  useEffect(() => {
-    if (phonePermission !== "granted" || !items.length) return;
-    let seen: string[] = [];
-    try { seen = JSON.parse(localStorage.getItem(phoneSeenKey) || "[]"); } catch {}
-    if (!seen.length) {
-      try { localStorage.setItem(phoneSeenKey, JSON.stringify(items.map(item => item.id).slice(0, 300))); } catch {}
-      return;
-    }
-    const next = items.find(item => !item.read && !seen.includes(item.id));
-    if (!next) return;
-    navigator.serviceWorker.ready.then(registration => registration.showNotification(next.title, {
-      body: next.message,
-      icon: "/icons/icon.svg",
-      badge: "/icons/icon.svg",
-      tag: next.id,
-      data: { url: next.orderId ? `/orders/${next.orderId}` : next.url || "/dashboard" },
-    })).catch(() => {});
-    const updatedSeen = Array.from(new Set([next.id, ...seen])).slice(0, 300);
-    try { localStorage.setItem(phoneSeenKey, JSON.stringify(updatedSeen)); } catch {}
-  }, [items, phonePermission, phoneSeenKey]);
-
   const dismissDerived = (id: string) => {
     const next = Array.from(new Set([...dismissed, id])).slice(-300);
     setDismissed(next);
@@ -267,31 +216,11 @@ export function NotificationCenter() {
                   <CheckCheck className="h-4 w-4" />
                 </button>
               )}
-              <button
-                onClick={enablePhoneNotifications}
-                className={cn("p-2 rounded-sm hover:bg-background", phonePermission === "granted" ? "text-income" : "text-muted-foreground hover:text-foreground")}
-                title={phonePermission === "granted" ? "Уведомления телефона включены" : "Включить уведомления на телефоне"}
-              >
-                <Smartphone className="h-4 w-4" />
-              </button>
               <button onClick={() => setOpen(false)} className="p-2 rounded-sm text-muted-foreground hover:text-foreground hover:bg-background" aria-label="Закрыть">
                 <X className="h-4 w-4" />
               </button>
             </div>
           </div>
-
-          {phonePermission !== "granted" && phonePermission !== "unsupported" && (
-            <div className="flex items-center gap-3 border-b border-border bg-primary/5 px-4 py-3">
-              <Smartphone className="h-5 w-5 shrink-0 text-primary" />
-              <div className="min-w-0 flex-1">
-                <p className="text-xs font-semibold">Уведомления на телефоне</p>
-                <p className="mt-0.5 text-[11px] text-muted-foreground">
-                  {phonePermission === "denied" ? "Разрешение отключено. Включите уведомления для KOVRON OS в настройках телефона." : "Получайте сроки, оплаты и новости KOVRON OS."}
-                </p>
-              </div>
-              {phonePermission !== "denied" && <Button type="button" size="sm" onClick={enablePhoneNotifications}>Включить</Button>}
-            </div>
-          )}
 
           <div className="overflow-y-auto max-h-[calc(70dvh-72px)]">
             {items.length === 0 ? (
