@@ -43,19 +43,6 @@ function createDraftOrderNumber() {
   return `${now.getDate().toString().padStart(2, "0")}${(now.getMonth() + 1).toString().padStart(2, "0")}-${time}-${suffix}`;
 }
 
-function withTimeout<T>(promise: Promise<T>, milliseconds: number, stage: string): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const timer = window.setTimeout(() => reject(new Error(`${stage} заняло слишком много времени`)), milliseconds);
-    promise.then(value => {
-      window.clearTimeout(timer);
-      resolve(value);
-    }, error => {
-      window.clearTimeout(timer);
-      reject(error);
-    });
-  });
-}
-
 export default function NewOrderPage() {
   const { user } = useAuth();
   const {
@@ -386,7 +373,7 @@ export default function NewOrderPage() {
       // Один запрос к серверу: клиент, автомобиль, заказ и предоплата
       // сохраняются вместе. Повторное нажатие дубль не создаёт —
       // сервер узнаёт заказ по идентификатору черновика.
-      const result = await withTimeout(createFullOrder({
+      const result = await createFullOrder({
         client: {
           id: existingClient?.id || clientDraftId.current,
           name: existingClient?.name || form.clientName.trim(),
@@ -425,7 +412,7 @@ export default function NewOrderPage() {
         payment: prepayment > 0
           ? { amount: prepayment, accountId: form.prepaymentAccount, method: paymentMethod }
           : undefined,
-      }), 30000, "Сохранение заказа");
+      });
 
       if (result) {
         setSavingStage("Заказ сохранён");
@@ -444,8 +431,8 @@ export default function NewOrderPage() {
       const details = err instanceof Error ? err.message : "";
       if (/row.level|permission|not authorized|jwt/i.test(details)) {
         setSaveError("У этого сотрудника нет прав на создание заказа. Проверьте роль в админке.");
-      } else if (/слишком много времени/i.test(details)) {
-        setSaveError("Сервер не ответил вовремя. Черновик сохранён — проверьте интернет и нажмите «Создать заказ» ещё раз, дубль не появится.");
+      } else if (/не ответил вовремя|не подтвердил сохранение/i.test(details)) {
+        setSaveError("Не удалось подтвердить сохранение. Черновик сохранён — соединение можно восстановить и повторить без дубля.");
       } else {
         setSaveError(`Не удалось сохранить заказ. Черновик сохранён.${details ? ` Причина: ${details}` : ""}`);
       }

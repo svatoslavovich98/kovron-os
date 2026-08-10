@@ -310,6 +310,34 @@ function getAdminErrorMessage(error: { message?: string; details?: string } | nu
   return error?.message || "Не удалось сохранить изменения";
 }
 
+/**
+ * Supabase fetch can occasionally remain pending in Android webviews even after
+ * the connection has already disappeared. Abort the real HTTP request instead
+ * of only hiding the spinner in the interface.
+ */
+async function runSupabaseRequest(
+  request: (signal: AbortSignal) => PromiseLike<any>,
+  timeoutMs: number,
+  label: string,
+): Promise<any> {
+  const controller = new AbortController();
+  const timer = globalThis.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await request(controller.signal);
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error(`${label}: сервер не ответил вовремя`);
+    }
+    throw error;
+  } finally {
+    globalThis.clearTimeout(timer);
+  }
+}
+
+function pause(milliseconds: number) {
+  return new Promise<void>(resolve => globalThis.setTimeout(resolve, milliseconds));
+}
+
 // ── Period filter helper ───────────────────────────────
 function isInPeriod(dateStr: string, period: PeriodFilter): boolean {
   const d = new Date(dateStr);
@@ -1186,8 +1214,8 @@ function useSupabaseData(): AppData {
     const sb = getSupabase();
     if (!sb) return null;
     const o = input.order;
-
-    const { data: result, error } = await sb.rpc("create_full_order", {
+    const orderId = o.id || crypto.randomUUID();
+    const rpcParams = {
       p_client: {
         id: input.client.id || null,
         name: input.client.name,
@@ -1208,7 +1236,7 @@ function useSupabaseData(): AppData {
         comment: input.car.comment || null,
       },
       p_order: {
-        id: o.id || null,
+        id: orderId,
         number: o.number || null,
         status: "new",
         kit_types: o.kitTypes || [],
@@ -1230,23 +1258,109 @@ function useSupabaseData(): AppData {
       p_amount: input.payment?.amount || 0,
       p_account_id: input.payment?.accountId || null,
       p_method: input.payment?.method || null,
-    });
+    };
 
-    if (error) {
-      console.error("create_full_order error:", error);
-      throw new Error(error.message || "Не удалось сохранить заказ");
+    const verifySavedOrder = async () => {
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        if (attempt > 0) await pause(700 * attempt);
+        try {
+          const { data: saved, error: verifyError } = await runSupabaseRequest(
+            signal => sb.from("orders")
+              .select("id, number, client_id, car_id")
+              .eq("id", orderId)
+              .abortSignal(signal)
+              .maybeSingle(),
+            6000,
+            "Проверка заказа",
+          );
+          if (!verifyError && saved) return saved;
+          if (verifyError) console.warn("Order verification error:", verifyError);
+        } catch (verifyError) {
+          console.warn("Order verification timeout:", verifyError);
+        }
+      }
+      return null;
+    };
+
+    let result: any = null;
+    let lastError: any = null;
+    for (let attempt = 0; attempt < 2 && !result; attempt += 1) {
+      try {
+        const response = await runSupabaseRequest(
+          signal => sb.rpc("create_full_order", rpcParams).abortSignal(signal),
+          18000,
+          "Сохранение заказа",
+        );
+        if (response.error) {
+          lastError = response.error;
+          // Повтор с тем же UUID безопасен: сначала проверяем, не успела ли
+          // завершиться первая попытка на сервере.
+          result = await verifySavedOrder();
+          if (!result && attempt === 0 && /fetch|network|timeout|abort/i.test(response.error.message || "")) continue;
+          if (!result) break;
+        } else {
+          result = response.data;
+        }
+      } catch (error) {
+        lastError = error;
+        result = await verifySavedOrder();
+      }
     }
 
-    // Данные подтягиваем в фоне — пользователь не ждёт полной перезагрузки
-    void fetchAll();
+    if (!result) {
+      const verified = await verifySavedOrder();
+      if (verified) result = verified;
+    }
+    if (!result) {
+      console.error("create_full_order error:", lastError);
+      throw new Error(lastError?.message || "Сервер не подтвердил сохранение заказа");
+    }
 
-    return {
+    const saved = {
       id: result.id as string,
       number: result.number as string,
       clientId: result.client_id as string,
       carId: result.car_id as string,
     };
-  }, [fetchAll]);
+
+    // Показываем новый заказ сразу, не дожидаясь полной синхронизации списков.
+    const createdAt = new Date().toISOString();
+    setData(prev => {
+      const nextClients = prev.clients.some(item => item.id === saved.clientId)
+        ? prev.clients
+        : [{ ...input.client, id: saved.clientId, createdAt } as Client, ...prev.clients];
+      const nextCars = prev.cars.some(item => item.id === saved.carId)
+        ? prev.cars
+        : [{ ...input.car, id: saved.carId, clientId: saved.clientId } as Car, ...prev.cars];
+      const localOrder: Order = {
+        ...o,
+        id: saved.id,
+        number: saved.number,
+        clientId: saved.clientId,
+        carId: saved.carId,
+        status: "new",
+        createdById: user?.id,
+        createdAt,
+        paid: input.payment?.amount || 0,
+        prepayment: input.payment?.amount || 0,
+        remaining: Number(o.totalPrice || 0) - Number(input.payment?.amount || 0),
+        plannedProfit: Number(o.totalPrice || 0) - Number(o.seamstressPayment || 0) - Number(o.chineseCost || 0) - Number(o.materialCost || 0) - Number(o.otherCosts || 0),
+        photos: o.photos || [],
+        kitTypes: o.kitTypes || [],
+        statusHistory: [],
+      } as Order;
+      return {
+        ...prev,
+        clients: nextClients,
+        cars: nextCars,
+        orders: prev.orders.some(item => item.id === saved.id)
+          ? prev.orders.map(item => item.id === saved.id ? { ...item, ...localOrder } : item)
+          : [localOrder, ...prev.orders],
+      };
+    });
+    void fetchAll();
+    return saved;
+  }, [fetchAll, user]);
 
   const updateOrder = useCallback(async (id: string, updates: Partial<Order>): Promise<boolean> => {
     const sb = getSupabase();
@@ -1437,36 +1551,35 @@ function useSupabaseData(): AppData {
     const order = data.orders.find(item => item.id === id);
     if (!order) return { ok: false, error: "Заказ не найден" };
 
-    // Сначала удаляем все связанные проводки через ту же серверную функцию,
-    // что используется в разделе «Финансы». Она возвращает деньги из операции
-    // в правильную кассу и пересчитывает оплаченную сумму заказа.
-    const { data: linkedTransactions, error: linkedError } = await sb
-      .from("transactions")
-      .select("id")
-      .eq("order_id", id);
-    if (linkedError) return { ok: false, error: linkedError.message };
-
-    for (const transaction of linkedTransactions || []) {
-      const { error: transactionError } = await sb.rpc("delete_transaction", {
-        p_id: transaction.id,
-        p_reason: `Автоматически удалено вместе с заказом №${order.number}`,
-      });
-      if (transactionError) {
-        return {
-          ok: false,
-          error: `Не удалось удалить связанную финансовую операцию: ${transactionError.message}`,
-        };
-      }
+    let rpcError: any = null;
+    try {
+      const response = await runSupabaseRequest(
+        signal => sb.rpc("delete_order", {
+          p_order_id: id,
+          p_reason: reason.trim() || "Ошибочно созданный заказ",
+        }).abortSignal(signal),
+        18000,
+        "Удаление заказа",
+      );
+      rpcError = response.error;
+    } catch (error) {
+      rpcError = error;
     }
 
-    // Удаляем и ещё не синхронизированные локальные операции этого заказа,
-    // чтобы они не появились снова после фоновой отправки.
-    writeFinanceOutbox(readFinanceOutbox().filter(item => item.orderId !== id));
-
-    const { error: rpcError } = await sb.rpc("delete_order", {
-      p_order_id: id,
-      p_reason: reason.trim() || "Ошибочно созданный заказ",
-    });
+    // После обрыва ответа сервер мог уже закончить транзакцию. Проверяем
+    // результат, чтобы не показывать ошибку для фактически удалённого заказа.
+    if (rpcError && !/function .*delete_order.* does not exist|schema cache/i.test(rpcError.message || "")) {
+      try {
+        const { data: stillExists, error: verifyError } = await runSupabaseRequest(
+          signal => sb.from("orders").select("id").eq("id", id).abortSignal(signal).maybeSingle(),
+          7000,
+          "Проверка удаления",
+        );
+        if (!verifyError && !stillExists) rpcError = null;
+      } catch {
+        // Ни успех, ни удаление не подтверждены — ниже вернём понятную ошибку.
+      }
+    }
 
     if (rpcError && !/function .*delete_order.* does not exist|schema cache/i.test(rpcError.message || "")) {
       return { ok: false, error: rpcError.message };
@@ -1475,26 +1588,83 @@ function useSupabaseData(): AppData {
     // Совместимость с базой, где новая серверная функция ещё не установлена:
     // для заказа без денег безопасно удаляем зависимые производственные записи.
     if (rpcError) {
+      let linkedTransactions: Array<{ id: string }> = [];
+      try {
+        const response = await runSupabaseRequest(
+          signal => sb.from("transactions").select("id").eq("order_id", id).abortSignal(signal),
+          8000,
+          "Поиск связанных операций",
+        );
+        if (response.error) return { ok: false, error: response.error.message };
+        linkedTransactions = response.data || [];
+      } catch (error) {
+        return { ok: false, error: error instanceof Error ? error.message : "Не удалось проверить операции заказа" };
+      }
+      for (const transaction of linkedTransactions) {
+        try {
+          const response = await runSupabaseRequest(
+            signal => sb.rpc("delete_transaction", {
+              p_id: transaction.id,
+              p_reason: `Автоматически удалено вместе с заказом №${order.number}`,
+            }).abortSignal(signal),
+            10000,
+            "Удаление финансовой операции",
+          );
+          if (response.error) return { ok: false, error: response.error.message };
+        } catch (error) {
+          return { ok: false, error: error instanceof Error ? error.message : "Не удалось удалить финансовую операцию" };
+        }
+      }
       const client = data.clients.find(item => item.id === order.clientId);
       const car = data.cars.find(item => item.id === order.carId);
       // У администратора эта копия попадёт в корзину. Для редактора политика
       // базы может запретить архивирование — удалению пустого заказа это не мешает.
-      await sb.from("deleted_records").insert({
-        entity_type: "order", entity_id: id,
-        data: { order, client, car }, deleted_by: user.id,
-        reason: reason.trim() || "Ошибочно созданный заказ",
-      });
-      await sb.from("notifications").update({ order_id: null }).eq("order_id", id);
-      const { error: paymentError } = await sb.from("seamstress_payments").delete().eq("order_id", id);
+      await runSupabaseRequest(
+        signal => sb.from("deleted_records").insert({
+          entity_type: "order", entity_id: id,
+          data: { order, client, car }, deleted_by: user.id,
+          reason: reason.trim() || "Ошибочно созданный заказ",
+        }).abortSignal(signal),
+        8000,
+        "Сохранение архивной копии",
+      );
+      await runSupabaseRequest(
+        signal => sb.from("notifications").update({ order_id: null }).eq("order_id", id).abortSignal(signal),
+        8000,
+        "Отвязка уведомлений",
+      );
+      const { error: paymentError } = await runSupabaseRequest(
+        signal => sb.from("seamstress_payments").delete().eq("order_id", id).abortSignal(signal),
+        8000,
+        "Удаление выплат",
+      );
       if (paymentError) return { ok: false, error: paymentError.message };
-      const { error: deleteError } = await sb.from("orders").delete().eq("id", id);
+      const { error: deleteError } = await runSupabaseRequest(
+        signal => sb.from("orders").delete().eq("id", id).abortSignal(signal),
+        10000,
+        "Удаление заказа",
+      );
       if (deleteError) return { ok: false, error: deleteError.message };
-      await sb.from("audit_log").insert({
-        user_id: user.id, user_name: user.name, action: "order_deleted",
-        details: `Удалён заказ №${order.number}. Причина: ${reason.trim() || "не указана"}`,
-        entity_type: "order", entity_id: id,
-      });
+      try {
+        await runSupabaseRequest(
+          signal => sb.from("audit_log").insert({
+            user_id: user.id, user_name: user.name, action: "order_deleted",
+            details: `Удалён заказ №${order.number}. Причина: ${reason.trim() || "не указана"}`,
+            entity_type: "order", entity_id: id,
+          }).abortSignal(signal),
+          6000,
+          "Запись в журнал",
+        );
+      } catch (auditError) {
+        // Сам заказ уже удалён. Ошибка необязательного журнала не должна
+        // возвращать пользователя к вечному повторению удаления.
+        console.warn("Delete audit error:", auditError);
+      }
     }
+
+    // Удаляем и ещё не синхронизированные локальные операции этого заказа,
+    // чтобы они не появились снова после фоновой отправки.
+    writeFinanceOutbox(readFinanceOutbox().filter(item => item.orderId !== id));
 
     setData(prev => ({
       ...prev,

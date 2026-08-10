@@ -56,13 +56,18 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
     }
     setDeleting(true);
     setDeleteError("");
-    const result = await deleteOrder(order.id, deleteReason.trim());
-    if (!result.ok) {
-      setDeleteError(result.error || "Не удалось удалить заказ");
+    try {
+      const result = await deleteOrder(order.id, deleteReason.trim());
+      if (!result.ok) {
+        setDeleteError(result.error || "Не удалось удалить заказ");
+        return;
+      }
+      router.replace("/orders");
+    } catch (error) {
+      setDeleteError(error instanceof Error ? error.message : "Не удалось удалить заказ");
+    } finally {
       setDeleting(false);
-      return;
     }
-    router.replace("/orders");
   };
 
   if (!order) {
