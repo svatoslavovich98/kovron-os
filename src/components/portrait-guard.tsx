@@ -15,6 +15,30 @@ export function PortraitGuard() {
       else window.addEventListener("load", register, { once: true });
     }
 
+    // Облегчённый режим для слабых телефонов.
+    // Считаем аппарат слабым, если у него мало памяти или ядер —
+    // браузеры Android честно сообщают эти цифры. На iPhone таких
+    // полей нет, и режим не включается, что и требуется.
+    try {
+      const nav = navigator as Navigator & {
+        deviceMemory?: number;
+        connection?: { saveData?: boolean; effectiveType?: string };
+      };
+      const memory = nav.deviceMemory;
+      const cores = nav.hardwareConcurrency;
+      const connection = nav.connection;
+
+      const weak =
+        (typeof memory === "number" && memory <= 4) ||
+        (typeof cores === "number" && cores <= 4) ||
+        connection?.saveData === true ||
+        (connection?.effectiveType ? /2g|3g/.test(connection.effectiveType) : false);
+
+      if (weak) document.documentElement.classList.add("lite-mode");
+    } catch {
+      /* Нет этих полей — значит и режим не нужен */
+    }
+
     const orientation = screen.orientation as ScreenOrientation & {
       lock?: (value: "portrait-primary") => Promise<void>;
     };

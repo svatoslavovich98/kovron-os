@@ -258,6 +258,48 @@ input[type="date"] {
   }
 }
 
+/* Облегчённый режим.
+   Включается сам на слабых телефонах и когда человек попросил в
+   настройках системы убрать анимации. Плавные переходы и тени
+   Android считает на процессоре, и на бюджетных аппаратах именно они
+   создают ощущение подтормаживания при прокрутке списка заказов. */
+html.lite-mode *,
+html.lite-mode *::before,
+html.lite-mode *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+
+html.lite-mode .card-glow:hover {
+  box-shadow: none;
+}
+
+html.lite-mode .glass {
+  background: hsl(var(--card));
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+/* Мерцающая заглушка при загрузке — самая дорогая анимация из всех,
+   потому что крутится сразу в десятке мест. Оставляем статичный фон. */
+html.lite-mode .skeleton {
+  animation: none !important;
+  background: hsl(var(--muted) / 0.4) !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
 @media print {
   aside, nav, .print-hide, button, select { display: none !important; }
   body, main { background: white !important; color: black !important; overflow: visible !important; height: auto !important; }

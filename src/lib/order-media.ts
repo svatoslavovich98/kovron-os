@@ -8,6 +8,11 @@ const BUCKET = "order-media";
 const MAX_SIDE = 1600;
 /** Качество WebP: визуально неотличимо, вес в разы меньше. */
 const WEBP_QUALITY = 0.82;
+/** Размер превью для списков заказов. */
+const THUMB_SIDE = 320;
+const THUMB_QUALITY = 0.7;
+/** Как называется превью рядом с оригиналом. */
+const THUMB_SUFFIX = ".thumb.";
 /** Сколько ждём ответа хранилища, прежде чем считать загрузку неудачной. */
 const UPLOAD_TIMEOUT_MS = 25000;
 
@@ -83,35 +88,50 @@ async function loadBitmap(file: File): Promise<ImageBitmap | HTMLImageElement> {
  * Возвращает готовый файл и расширение. Если браузер не умеет
  * WebP — сохраняет в JPEG, качество и размер остаются приемлемыми.
  */
-async function compressImage(file: File): Promise<{ blob: Blob; ext: string; type: string }> {
+async function compressImage(
+  file: File
+): Promise<{ blob: Blob; ext: string; type: string; thumb: Blob | null }> {
   const source = await loadBitmap(file);
   const width = "width" in source ? source.width : 0;
   const height = "height" in source ? source.height : 0;
   if (!width || !height) throw new Error("Не удалось определить размер изображения");
 
-  const scale = Math.min(1, MAX_SIDE / Math.max(width, height));
-  const canvas = document.createElement("canvas");
-  canvas.width = Math.max(1, Math.round(width * scale));
-  canvas.height = Math.max(1, Math.round(height * scale));
-
-  const context = canvas.getContext("2d");
-  if (!context) throw new Error("Не удалось подготовить фотографию");
-  context.drawImage(source as CanvasImageSource, 0, 0, canvas.width, canvas.height);
-  if ("close" in source && typeof source.close === "function") source.close();
-
   const useWebp = supportsWebp();
   const type = useWebp ? "image/webp" : "image/jpeg";
   const ext = useWebp ? "webp" : "jpg";
 
-  const blob = await new Promise<Blob>((resolve, reject) => {
-    canvas.toBlob(
-      result => (result ? resolve(result) : reject(new Error("Не удалось сжать фотографию"))),
-      type,
-      WEBP_QUALITY
-    );
-  });
+  const draw = async (maxSide: number, quality: number) => {
+    const scale = Math.min(1, maxSide / Math.max(width, height));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(width * scale));
+    canvas.height = Math.max(1, Math.round(height * scale));
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("Не удалось подготовить фотографию");
+    context.drawImage(source as CanvasImageSource, 0, 0, canvas.width, canvas.height);
+    return new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob(
+        result => (result ? resolve(result) : reject(new Error("Не удалось сжать фотографию"))),
+        type,
+        quality
+      );
+    });
+  };
 
-  return { blob, ext, type };
+  const blob = await draw(MAX_SIDE, WEBP_QUALITY);
+
+  // Маленькая копия для списков. Тарифный план Supabase не умеет
+  // уменьшать картинки на лету, поэтому готовим превью здесь, один раз
+  // при загрузке — потом список тянет 10–20 КБ вместо трёхсот.
+  let thumb: Blob | null = null;
+  try {
+    thumb = await draw(THUMB_SIDE, THUMB_QUALITY);
+  } catch (thumbError) {
+    console.warn("Превью не создалось, покажем полное фото:", thumbError);
+  }
+
+  if ("close" in source && typeof source.close === "function") source.close();
+
+  return { blob, ext, type, thumb };
 }
 
 export async function uploadOrderMedia(
@@ -129,7 +149,7 @@ export async function uploadOrderMedia(
   // Сжимаем всегда — в хранилище летят сотни килобайт вместо десятков мегабайт.
   // Если браузер не смог обработать файл (необычный формат с телефона),
   // отправляем оригинал: лучше тяжёлое фото, чем никакого.
-  let prepared: { blob: Blob; ext: string; type: string };
+  let prepared: { blob: Blob; ext: string; type: string; thumb: Blob | null };
   try {
     prepared = await compressImage(file);
   } catch (err) {
@@ -141,6 +161,7 @@ export async function uploadOrderMedia(
       blob: file,
       ext: safeExtension(file),
       type: file.type || "image/jpeg",
+      thumb: null,
     };
   }
 
@@ -168,6 +189,24 @@ export async function uploadOrderMedia(
     if (error) {
       console.error("Storage upload error:", error);
       throw new Error(`Не удалось загрузить фотографию: ${error.message}`);
+    }
+
+    // Превью грузим следом и не ждём результата: если оно не доедет,
+    // список просто покажет полное фото.
+    if (prepared.thumb) {
+      const name = path.slice(path.lastIndexOf("/") + 1);
+      const thumbPath = path.replace(
+        name,
+        name.replace(`.${prepared.ext}`, `${THUMB_SUFFIX}${prepared.ext}`)
+      );
+      void sb.storage
+        .from(BUCKET)
+        .upload(thumbPath, prepared.thumb, {
+          cacheControl: "31536000",
+          contentType: prepared.type,
+          upsert: true,
+        })
+        .catch(() => undefined);
     }
 
     const { data } = sb.storage.from(BUCKET).getPublicUrl(path);
@@ -214,6 +253,35 @@ export function orderCoverPhoto(photos: string[] = [], layoutImage?: string | nu
   return usable.find(isCarViewPhoto)
     || usable.find(url => !isFinishedPhoto(url))
     || (isDisplayableImage(layoutImage) ? layoutImage! : undefined);
+}
+
+/**
+ * Ссылка на маленькую копию картинки для списков.
+ *
+ * Копия кладётся рядом с оригиналом при загрузке. У фотографий,
+ * загруженных раньше, её нет — поэтому там, где показываем превью,
+ * нужен запасной переход на полное фото (см. thumbnailFallback).
+ */
+export function thumbnailUrl(url?: string | null) {
+  if (!isDisplayableImage(url)) return undefined;
+  const src = url!;
+  if (!src.includes("/storage/v1/object/public/")) return src;
+  const dot = src.lastIndexOf(".");
+  if (dot <= src.lastIndexOf("/")) return src;
+  return `${src.slice(0, dot)}${THUMB_SUFFIX}${src.slice(dot + 1)}`;
+}
+
+/**
+ * Обработчик ошибки загрузки превью: молча подставляет оригинал.
+ * Нужен для старых фотографий, у которых маленькой копии нет.
+ */
+export function thumbnailFallback(fullUrl?: string) {
+  return (event: { currentTarget: HTMLImageElement }) => {
+    const img = event.currentTarget;
+    if (!fullUrl || img.dataset.fellBack === "1") return;
+    img.dataset.fellBack = "1";
+    img.src = fullUrl;
+  };
 }
 
 /** Есть ли у заказа фотографии вообще — включая те, что лежат в базе. */

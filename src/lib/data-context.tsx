@@ -748,6 +748,9 @@ function useSupabaseData(): AppData {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const syncingCoreData = useRef(false);
+  const loadingMoreOrders = useRef(false);
+  const ordersTotalRef = useRef(0);
+  const oldestOrderDate = useRef<string | null>(null);
 
   // Показываем сохранённый снимок сразу, не дожидаясь сервера
   const snapshotLoaded = useRef(false);
@@ -758,6 +761,51 @@ function useSupabaseData(): AppData {
     if (snapshot) {
       setData(snapshot);
       setLoading(false);
+    }
+  }, [user]);
+
+  // Сколько заказов приходит в первом ответе. Остальные подтягиваются
+  // фоном — так Android рисует список за доли секунды даже когда
+  // заказов накопились сотни.
+  const FIRST_PAGE_SIZE = 40;
+  const NEXT_PAGE_SIZE = 60;
+
+  const loadRemainingOrders = useCallback(async (loaded: number) => {
+    const sb = getSupabase();
+    if (!sb || !user) return;
+    if (loadingMoreOrders.current) return;
+    if (loaded >= ordersTotalRef.current) return;
+
+    loadingMoreOrders.current = true;
+    try {
+      let cursor = oldestOrderDate.current;
+      let guard = 0;
+      while (cursor && guard < 50) {
+        guard += 1;
+        const { data: page, error: pageError } = await sb.rpc("get_more_orders", {
+          p_before: cursor,
+          p_limit: NEXT_PAGE_SIZE,
+        });
+        if (pageError) throw pageError;
+        const rows = (page || []) as any[];
+        if (rows.length === 0) break;
+
+        const mapped = rows.map(mapOrderRow);
+        setData(prev => {
+          const known = new Set(prev.orders.map(o => o.id));
+          const fresh = mapped.filter(o => !known.has(o.id));
+          if (fresh.length === 0) return prev;
+          return { ...prev, orders: [...prev.orders, ...fresh] };
+        });
+
+        cursor = rows[rows.length - 1]?.created_at || null;
+        oldestOrderDate.current = cursor;
+        if (rows.length < NEXT_PAGE_SIZE) break;
+      }
+    } catch (moreError) {
+      console.error("Order pagination error:", moreError);
+    } finally {
+      loadingMoreOrders.current = false;
     }
   }, [user]);
 
@@ -785,9 +833,12 @@ function useSupabaseData(): AppData {
         // Один запрос вместо одиннадцати. При удалённой базе каждое
         // обращение стоит сотни миллисекунд, поэтому важно не количество
         // данных, а количество поездок до сервера.
-        const { data: bundle, error: bundleError } = await sb.rpc("get_app_data");
+        const { data: bundle, error: bundleError } = await sb.rpc("get_app_data", {
+          p_orders_limit: FIRST_PAGE_SIZE,
+        });
         if (bundleError) throw new Error(bundleError.message);
-        const b = (bundle || {}) as Record<string, any[]>;
+        const b = (bundle || {}) as Record<string, any>;
+        ordersTotalRef.current = Number(b.orders_total) || 0;
         return [
           { data: b.profiles || [] },
           { data: b.statuses || [] },
@@ -848,7 +899,13 @@ function useSupabaseData(): AppData {
         })),
         clients: (clients || []).map(mapClientRow),
         cars: (cars || []).map(mapCarRow),
-        orders: (rawOrders || []).map(mapOrderRow),
+        orders: (() => {
+          const rows = rawOrders || [];
+          oldestOrderDate.current = rows.length
+            ? (rows[rows.length - 1] as any).created_at || null
+            : null;
+          return rows.map(mapOrderRow);
+        })(),
         transactions: allTransactions,
         seamstressPayments: (seamstressPayments || []).map(sp => ({
           id: sp.id, orderId: sp.order_id, amount: Number(sp.amount),
@@ -872,13 +929,18 @@ function useSupabaseData(): AppData {
       });
 
       setError(null);
+      setLoading(false);
+
+      // Первый экран показываем сразу, а хвост истории дотягиваем следом.
+      // Финансы считаются по всем заказам, поэтому остаток обязательно
+      // догружаем — просто уже не задерживая появление приложения.
+      void loadRemainingOrders((rawOrders || []).length);
     } catch (err: any) {
       setError(err.message || "Ошибка загрузки данных");
       console.error("Data fetch error:", err);
+      setLoading(false);
     }
-
-    setLoading(false);
-  }, [user]);
+  }, [user, loadRemainingOrders]);
 
   // Сохраняем снимок при каждом обновлении данных —
   // следующий запуск откроется мгновенно
@@ -894,9 +956,12 @@ function useSupabaseData(): AppData {
     syncingCoreData.current = true;
     try {
       // Фоновая синхронизация тоже одним запросом
-      const { data: bundle, error: bundleError } = await sb.rpc("get_app_data");
+      const { data: bundle, error: bundleError } = await sb.rpc("get_app_data", {
+        p_orders_limit: FIRST_PAGE_SIZE,
+      });
       if (bundleError) throw bundleError;
       const b = bundle || {};
+      ordersTotalRef.current = Number(b.orders_total) || ordersTotalRef.current;
       const remoteTransactions = (b.transactions || []).map(mapTransactionRow);
       const remoteIds = new Set(remoteTransactions.map((t: Transaction) => t.id));
       const pending = readFinanceOutbox().filter(item => !remoteIds.has(item.id));
@@ -907,7 +972,17 @@ function useSupabaseData(): AppData {
         ...prev,
         clients: (b.clients || []).map(mapClientRow),
         cars: (b.cars || []).map(mapCarRow),
-        orders: (b.orders || []).map(mapOrderRow),
+        // Свежая страница перекрывает то, что уже показано, а более
+        // старые заказы из догрузки остаются на месте — иначе синхронизация
+        // каждый раз обрезала бы список до сорока штук.
+        orders: (() => {
+          const fresh = (b.orders || []).map(mapOrderRow) as Order[];
+          const freshIds = new Set(fresh.map(o => o.id));
+          const tail = prev.orders.filter(o => !freshIds.has(o.id));
+          return [...fresh, ...tail].sort(
+            (a, b2) => new Date(b2.createdAt).getTime() - new Date(a.createdAt).getTime()
+          );
+        })(),
         transactions: allTransactions,
         accounts: applyLedgerBalances(
           (b.accounts || []).map((a: any) => ({

@@ -15,7 +15,7 @@ import {
   UserRound, Loader2, Download, SlidersHorizontal, Phone,
   Images, AlertTriangle, Check, X, WalletCards, Car, Ruler,
 } from "lucide-react";
-import { orderCoverPhoto } from "@/lib/order-media";
+import { orderCoverPhoto, thumbnailUrl, thumbnailFallback } from "@/lib/order-media";
 import { LayoutImageOverlay } from "@/components/layout-image-viewer";
 
 const statusFilters: { key: string; label: string }[] = [
@@ -301,9 +301,13 @@ export default function OrdersPage() {
                       {/* Обложка заказа — фотография «Вид машины» */}
                       {orderCoverPhoto(order.photos, order.layoutImage) ? (
                         <img
-                          src={orderCoverPhoto(order.photos, order.layoutImage)}
+                          src={thumbnailUrl(orderCoverPhoto(order.photos, order.layoutImage))}
+                          onError={thumbnailFallback(orderCoverPhoto(order.photos, order.layoutImage))}
                           alt=""
                           loading="lazy"
+                          decoding="async"
+                          width={56}
+                          height={56}
                           className="h-14 w-14 shrink-0 rounded-md object-cover border border-border bg-background"
                         />
                       ) : (
